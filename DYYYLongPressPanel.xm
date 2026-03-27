@@ -449,7 +449,7 @@
         [viewModels addObject:voiceViewModel];
     }
 
-    if (enableSaveAudio && enableVoiceFavorites) {
+    if (enableVoiceFavorites) {
         AWELongPressPanelBaseViewModel *favAudioViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         favAudioViewModel.awemeModel = self.awemeModel;
         favAudioViewModel.actionType = 681; 
@@ -1210,7 +1210,7 @@
         [viewModels addObject:voiceViewModel];
     }
 
-    if (enableSaveAudio && enableVoiceFavorites) {
+    if (enableVoiceFavorites) {
         AWELongPressPanelBaseViewModel *favAudioViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         favAudioViewModel.awemeModel = self.awemeModel;
         favAudioViewModel.actionType = 681; 
