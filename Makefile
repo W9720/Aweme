@@ -31,23 +31,37 @@ INSTALL_TARGET_PROCESSES = Aweme
 GO_EASY_ON_ME = 1
 export ERROR_ON_WARNINGS = 0
 export TARGET_HAS_APPSnippets = 0
-# --- 关键修复区域：移除 -fno-modules，改用正确的标准库路径 ---
-# 我们需要告诉编译器，不要用 toolchain 里的破旧库，去用系统的标准库
-ADDITIONAL_CFLAGS += -I$(THEOS)/sdks/iPhoneOS14.5.sdk/usr/include/c++/v1
-ADDITIONAL_OBJCFLAGS += -I$(THEOS)/sdks/iPhoneOS14.5.sdk/usr/include/c++/v1
-ADDITIONAL_CXXFLAGS += -stdlib=libc++
-ADDITIONAL_OBJCCXXFLAGS += -stdlib=libc++
-# -----------------------------------------------------------
+
+# ==========================================================
+# === 核心修复 1：仅在非 GitHub Actions 环境下注入旧版工具链头文件路径 ===
+# ==========================================================
+ifneq ($(GITHUB_ACTIONS),true)
+    # 💻 本地 Windows (WSL) 环境下，手动喂饭指定 C++ 标准库路径
+    ADDITIONAL_CFLAGS += -I$(THEOS)/sdks/iPhoneOS14.5.sdk/usr/include/c++/v1
+    ADDITIONAL_OBJCFLAGS += -I$(THEOS)/sdks/iPhoneOS14.5.sdk/usr/include/c++/v1
+    ADDITIONAL_CXXFLAGS += -stdlib=libc++
+    ADDITIONAL_OBJCCXXFLAGS += -stdlib=libc++
+endif
+# ☁️ 如果是 GitHub Actions，上面这段会被跳过，使用 macOS 原生极度聪明的 Clang 寻址
 
 include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = DYYY
 
-DYYY_FILES = DYYY.xm DYYYFloatClearButton.xm DYYYFloatSpeedButton.m DYYYSettings.xm DYYYABTestHook.xm DYYYLongPressPanel.xm DYYYSettingsHelper.m DYYYImagePickerDelegate.m DYYYBackupPickerDelegate.m DYYYSettingViewController.m DYYYBottomAlertView.m DYYYCustomInputView.m DYYYOptionsSelectionView.m DYYYIconOptionsDialogView.m DYYYAboutDialogView.m DYYYKeywordListView.m DYYYFilterSettingsView.m DYYYConfirmCloseView.m DYYYToast.m DYYYManager.m DYYYUtils.m CityManager.m AWMSafeDispatchTimer.m DYYYAudioManager.m
+DYYY_FILES = DYYY.xm DYYYFloatClearButton.xm DYYYFloatSpeedButton.m DYYYSettings.xm DYYYABTestHook.xm DYYYLongPressPanel.xm DYYYSettingsHelper.m DYYYImagePickerDelegate.m DYYYBackupPickerDelegate.m DYYYSettingViewController.m DYYYBottomAlertView.m DYYYCustomInputView.m DYYYOptionsSelectionView.m DYYYIconOptionsDialogView.m DYYYAboutDialogView.m DYYYKeywordListView.m DYYYFilterSettingsView.m DYYYConfirmCloseView.m DYYYToast.m DYYYManager.m DYYYUtils.m CityManager.m AWMSafeDispatchTimer.m DYYYAudioManager.m DYYYVoiceViewController.m
+
+# ==========================================================
+# === 核心修复 2：统一编译和链接标志 ===
+# ==========================================================
 DYYY_CFLAGS = -fobjc-arc -w
-DYYY_LDFLAGS = -weak_framework AVFAudio -Wl,-no_warn_incompatible_arm64e
-DYYY_FRAMEWORKS = CoreAudio
-CXXFLAGS += -std=c++11
-CCFLAGS += -std=c++11
+
+# 所有环境都适用的 C++ 标准声明
+DYYY_CXXFLAGS = -std=c++11 -stdlib=libc++
+
+# [必选项] 必须链接 -lc++，否则链接器找不到 C++ 标准库的实现
+DYYY_LDFLAGS = -lc++ -weak_framework AVFAudio -Wl,-no_warn_incompatible_arm64e
+
+# [必选项] 必须补齐所有依赖的框架，防止符号未定义 (Undefined symbols)
+DYYY_FRAMEWORKS = UIKit Photos AVFoundation CoreGraphics CoreMedia CoreAudio
 
 export THEOS_STRICT_LOGOS=0
 export LOGOS_DEFAULT_GENERATOR=internal
