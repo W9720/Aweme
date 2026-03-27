@@ -350,7 +350,7 @@ static void DYYYApplyDisplayLocationToLabel(UILabel *label, NSString *displayLoc
         UIWindowScene *targetScene = activeScene ?: inactiveScene;
         if (targetScene) {
             if (@available(iOS 15.0, *)) {
-                return targetScene.keyWindow ?: targetScene.windows.firstObject ?: fallbackWindow;
+                return targetScene.windows.firstObject ?: fallbackWindow;
             } else {
                 UIWindow *firstVisibleWindow = nil;
 

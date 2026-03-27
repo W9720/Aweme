@@ -118,9 +118,20 @@
     // 设置环形进度
     _progressLayer.strokeEnd = progress;
 
+    // 【核心修复1】：如果正在播放成功动画，不更新文字，防止动画冲突
+    if (self.isShowingSuccessAnimation) return;
+
     // 更新进度百分比
     int percentage = (int)(progress * 100);
     _percentLabel.text = [NSString stringWithFormat:@"下载中... %d%%", percentage];
+
+    // 【核心修复2】：当进度到达100%时，强制自动触发绿色打钩动画并销毁！彻底斩杀卡死Bug！
+    if (progress >= 1.0) {
+        self.allowSuccessAnimation = YES; 
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self dismiss];
+        });
+    }
 }
 
 - (void)show {
