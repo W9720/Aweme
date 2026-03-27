@@ -4,7 +4,8 @@
 #import <AVFoundation/AVFoundation.h> 
 #import <objc/runtime.h>
 
-@interface DYYYVoiceViewController () <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
+// 新增 UIDocumentPickerDelegate 协议以支持文件导入
+@interface DYYYVoiceViewController () <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate, UIDocumentPickerDelegate>
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<NSDictionary *> *originalDataList;
 @property (nonatomic, strong) NSArray<NSDictionary *> *dataList;
@@ -57,12 +58,21 @@
     [closeBtn addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.headerView addSubview:closeBtn];
     
+    // 依次排列：编辑、导入、新建文件夹
     UIButton *editBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    editBtn.frame = CGRectMake(self.view.bounds.size.width - 90, 15, 30, 30);
+    editBtn.frame = CGRectMake(self.view.bounds.size.width - 130, 15, 30, 30);
     [editBtn setImage:[UIImage systemImageNamed:@"checkmark.circle"] forState:UIControlStateNormal];
     editBtn.tintColor = [UIColor blackColor];
     [editBtn addTarget:self action:@selector(editTapped:) forControlEvents:UIControlEventTouchUpInside];
     [self.headerView addSubview:editBtn];
+    
+    // 新增：导入音频按钮
+    UIButton *importBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    importBtn.frame = CGRectMake(self.view.bounds.size.width - 90, 15, 30, 30);
+    [importBtn setImage:[UIImage systemImageNamed:@"square.and.arrow.down"] forState:UIControlStateNormal];
+    importBtn.tintColor = [UIColor blackColor];
+    [importBtn addTarget:self action:@selector(importAudioTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.headerView addSubview:importBtn];
     
     UIButton *addBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     addBtn.frame = CGRectMake(self.view.bounds.size.width - 50, 15, 30, 30);
@@ -250,6 +260,63 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 
+// 新增：获取当前工作目录的安全方法
+- (NSString *)getCurrentFolderPath {
+    if (self.originalDataList.count > 0) {
+        return [self.originalDataList.firstObject[@"path"] stringByDeletingLastPathComponent];
+    } else {
+        // 空目录时临时创建一个文件夹获取路径后删除
+        [[DYYYAudioManager sharedManager] createFolderNamed:@"DYYY_TMP_DIR" atSubPath:self.subPath];
+        NSArray *tempList = [[DYYYAudioManager sharedManager] getContentsAtSubPath:self.subPath];
+        NSString *folderPath = nil;
+        for (NSDictionary *dict in tempList) {
+            if ([dict[@"name"] isEqualToString:@"DYYY_TMP_DIR"]) {
+                folderPath = [dict[@"path"] stringByDeletingLastPathComponent];
+                [[DYYYAudioManager sharedManager] deleteItemAtPath:dict[@"path"]];
+                break;
+            }
+        }
+        return folderPath;
+    }
+}
+
+// 新增：点击导入音频
+- (void)importAudioTapped {
+    // 允许导入所有音频类型
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.audio"] inMode:UIDocumentPickerModeImport];
+    picker.delegate = self;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+// 新增：文件选择器回调处理
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSURL *fileURL = urls.firstObject;
+    if (!fileURL) return;
+    
+    NSString *currentFolderPath = [self getCurrentFolderPath];
+    if (currentFolderPath) {
+        NSString *fileName = [fileURL lastPathComponent];
+        NSString *destinationPath = [currentFolderPath stringByAppendingPathComponent:fileName];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        
+        if ([fm fileExistsAtPath:destinationPath]) {
+            [DYYYUtils showToast:@"文件已存在！"];
+            return;
+        }
+        
+        NSError *error = nil;
+        [fm copyItemAtURL:fileURL toURL:[NSURL fileURLWithPath:destinationPath] error:&error];
+        if (!error) {
+            [self loadData];
+            [DYYYUtils showToast:@"导入音频成功"];
+        } else {
+            [DYYYUtils showToast:@"导入失败，请重试"];
+        }
+    } else {
+        [DYYYUtils showToast:@"无法获取当前目录"];
+    }
+}
+
 - (void)editTapped:(UIButton *)sender {
     self.isEditMode = !self.isEditMode;
     [self.selectedPaths removeAllObjects];
@@ -407,7 +474,6 @@
         
         UIButton *playBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         playBtn.frame = CGRectMake(bgView.bounds.size.width - 90, 20, 30, 30);
-        playBtn.tintColor = [UIColor colorWithRed:0.1 green:0.8 blue:0.3 alpha:1.0];
         playBtn.tag = 104;
         [playBtn addTarget:self action:@selector(playTapped:) forControlEvents:UIControlEventTouchUpInside];
         [bgView addSubview:playBtn];
@@ -479,11 +545,15 @@
             subLabel.text = [NSString stringWithFormat:@"%@ · %@", item[@"ext"], item[@"size"]];
         }
         arrow.hidden = YES; 
+        
         if (!self.isEditMode) {
             playBtn.hidden = NO;
             sendBtn.hidden = NO;
             BOOL isPlaying = [self.playingPath isEqualToString:item[@"path"]];
             [playBtn setImage:[UIImage systemImageNamed:isPlaying ? @"pause.fill" : @"play.fill"] forState:UIControlStateNormal];
+            
+            // 新增：判断是否在播放，播放中变为红色，未播放保持默认绿色
+            playBtn.tintColor = isPlaying ? [UIColor systemRedColor] : [UIColor colorWithRed:0.1 green:0.8 blue:0.3 alpha:1.0];
         }
     }
     
