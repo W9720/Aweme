@@ -61,7 +61,7 @@ DYYY_FILES = DYYY.xm DYYYFloatClearButton.xm DYYYFloatSpeedButton.m DYYYSettings
 DYYY_CFLAGS = -fobjc-arc -w
 
 # 链接 C++ 标准库
-DYYY_LDFLAGS = -lc++ -weak_framework AVFAudio -Wl,-no_warn_incompatible_arm64e
+DYYY_LDFLAGS = -lc++ -weak_framework AVFAudio
 
 # 必须的 Frameworks
 DYYY_FRAMEWORKS = UIKit Photos AVFoundation CoreGraphics CoreMedia CoreAudio
