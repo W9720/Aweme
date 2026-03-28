@@ -46,7 +46,7 @@
     self.headerView.backgroundColor = [UIColor whiteColor];
     
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 20, self.view.bounds.size.width, 20)];
-    titleLabel.text = self.subPath.length > 0 ? [self.subPath lastPathComponent] : @"语音助手";
+    titleLabel.text = self.subPath.length > 0 ? [self.subPath lastPathComponent] : @"音频助手";
     titleLabel.font = [UIFont boldSystemFontOfSize:18];
     titleLabel.textAlignment = NSTextAlignmentCenter;
     [self.headerView addSubview:titleLabel];

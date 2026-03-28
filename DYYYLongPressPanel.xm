@@ -432,7 +432,7 @@
         voiceViewModel.awemeModel = self.awemeModel;
         voiceViewModel.actionType = 680;
         voiceViewModel.duxIconName = @"ic_phonearrowup_outlined_20"; 
-        voiceViewModel.describeString = @"语音助手";
+        voiceViewModel.describeString = @"音频助手";
         voiceViewModel.action = ^{
             AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
             [panelManager dismissWithAnimation:YES completion:^{
@@ -454,7 +454,7 @@
         favAudioViewModel.awemeModel = self.awemeModel;
         favAudioViewModel.actionType = 681; 
         favAudioViewModel.duxIconName = @"ic_star_outlined_20"; 
-        favAudioViewModel.describeString = @"收藏此语音";
+        favAudioViewModel.describeString = @"音频入库";
         favAudioViewModel.action = ^{
             AWEAwemeModel *awemeModel = self.awemeModel;
             id musicModel = awemeModel.music;
@@ -1193,7 +1193,7 @@
         voiceViewModel.awemeModel = self.awemeModel;
         voiceViewModel.actionType = 680;
         voiceViewModel.duxIconName = @"ic_phonearrowup_outlined_20"; 
-        voiceViewModel.describeString = @"语音助手";
+        voiceViewModel.describeString = @"音频助手";
         voiceViewModel.action = ^{
             AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
             [panelManager dismissWithAnimation:YES completion:^{
@@ -1215,7 +1215,7 @@
         favAudioViewModel.awemeModel = self.awemeModel;
         favAudioViewModel.actionType = 681; 
         favAudioViewModel.duxIconName = @"ic_star_outlined_20"; 
-        favAudioViewModel.describeString = @"收藏此语音";
+        favAudioViewModel.describeString = @"音频入库";
         favAudioViewModel.action = ^{
             AWEAwemeModel *awemeModel = self.awemeModel;
             id musicModel = awemeModel.music;
