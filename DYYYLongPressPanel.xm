@@ -1567,71 +1567,46 @@ static NSString *g_lastCapturedAudioPath = nil;
 }
 %end
 
-%hook UIMenuController
-- (void)setMenuItems:(NSArray *)items {
-    UIViewController *topVC = [DYYYUtils topView];
-    NSString *vcName = NSStringFromClass([topVC class]);
-    
-    // 仅在私信/聊天相关的界面触发
-    if ([vcName containsString:@"IM"] || [vcName containsString:@"Chat"] || [vcName containsString:@"Message"]) {
-        NSMutableArray *newItems = items ? [NSMutableArray arrayWithArray:items] : [NSMutableArray array];
-        BOOL hasExport = NO;
-        for (UIMenuItem *item in newItems) {
-            if ([item.title isEqualToString:@"导出为音频文件"]) hasExport = YES;
+// ==========================================
+// 📱 物理外挂：摇一摇手机触发导出逻辑 (修复播放无声版)
+// ==========================================
+%hook UIWindow
+- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event {
+    if (motion == UIEventSubtypeMotionShake) {
+        if (g_lastCapturedAudioPath && [[NSFileManager defaultManager] fileExistsAtPath:g_lastCapturedAudioPath]) {
+            
+            // 1. 修复路径Bug：直接保存到语音助手的【根目录】，防止播放器在子目录找不到文件
+            NSString *targetDir = [[DYYYAudioManager sharedManager] voiceDirectory];
+            
+            // 2. 修复格式Bug：获取真实的后缀名。如果抖音缓存没有后缀，默认给 aac 防止系统解码器罢工
+            NSString *ext = g_lastCapturedAudioPath.pathExtension.lowercaseString;
+            if (ext.length == 0 || [ext containsString:@"tmp"]) {
+                ext = @"aac"; // 适配抖音底层的原生音频流
+            }
+            
+            NSString *fileName = [NSString stringWithFormat:@"私信导出_%ld.%@", (long)[[NSDate date] timeIntervalSince1970], ext];
+            NSString *targetPath = [targetDir stringByAppendingPathComponent:fileName];
+            
+            NSError *error = nil;
+            [[NSFileManager defaultManager] copyItemAtPath:g_lastCapturedAudioPath toPath:targetPath error:&error];
+            
+            if (!error) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [DYYYUtils showToast:@"✅ 摇一摇：语音已成功导出至音频助手首页~"];
+                });
+                // 导出成功后清空记录，防止下次误摇
+                g_lastCapturedAudioPath = nil; 
+            } else {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [DYYYUtils showToast:@"❌ 导出失败，请重试"];
+                });
+            }
         }
-        if (!hasExport) {
-            UIMenuItem *exportItem = [[UIMenuItem alloc] initWithTitle:@"导出为音频文件" action:NSSelectorFromString(@"dyyy_exportVoice:")];
-            [newItems addObject:exportItem];
-        }
-        %orig(newItems);
-    } else {
-        %orig(items);
     }
+    %orig;
 }
 %end
 
-%hook UIResponder
-- (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
-    if (action == NSSelectorFromString(@"dyyy_exportVoice:")) {
-        return YES;
-    }
-    return %orig;
-}
-
-%new
-- (void)dyyy_exportVoice:(id)sender {
-    if (g_lastCapturedAudioPath && [[NSFileManager defaultManager] fileExistsAtPath:g_lastCapturedAudioPath]) {
-        
-        NSString *targetDir = [[DYYYAudioManager sharedManager] voiceDirectory];
-        NSString *tmpDir = [targetDir stringByAppendingPathComponent:@"DYYY_TMP_DIR"];
-        
-        NSFileManager *fm = [NSFileManager defaultManager];
-        if (![fm fileExistsAtPath:tmpDir]) {
-            [fm createDirectoryAtPath:tmpDir withIntermediateDirectories:YES attributes:nil error:nil];
-        }
-        
-        NSString *fileName = [NSString stringWithFormat:@"私信导出_%ld.%@", (long)[[NSDate date] timeIntervalSince1970], g_lastCapturedAudioPath.pathExtension];
-        NSString *targetPath = [tmpDir stringByAppendingPathComponent:fileName];
-        
-        NSError *error = nil;
-        [fm copyItemAtPath:g_lastCapturedAudioPath toPath:targetPath error:&error];
-        
-        if (!error) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [DYYYUtils showToast:@"✅ 语音已成功导出至 DYYY_TMP_DIR！"];
-            });
-        } else {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [DYYYUtils showToast:@"❌ 导出失败，请重试"];
-            });
-        }
-    } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [DYYYUtils showToast:@"⚠️ 请先点击播放一下该语音，然后再长按导出！"];
-        });
-    }
-}
-%end
 
 %ctor {
     if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYUserAgreementAccepted"]) {
