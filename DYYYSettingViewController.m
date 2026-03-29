@@ -2,8 +2,9 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import "DYYYConstants.h"
+#import "DYYYUtils.h" 
 
-typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYYYSettingItemTypeTextField, DYYYSettingItemTypePicker };
+typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYYYSettingItemTypeTextField, DYYYSettingItemTypePicker, DYYYSettingItemTypeButton };
 
 @interface DYYYSettingItem : NSObject
 
@@ -69,16 +70,13 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
 - (void)setupDefaultValues {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 
-    // 如果快捷倍速数值未设置，设置默认值
     if (![defaults objectForKey:@"DYYYSpeedSettings"]) {
         [defaults setObject:@"1.0,1.25,1.5,2.0" forKey:@"DYYYSpeedSettings"];
     }
 
-    // 如果按钮大小未设置，设置默认值
     if (![defaults objectForKey:@"DYYYSpeedButtonSize"]) {
         [defaults setFloat:32.0 forKey:@"DYYYSpeedButtonSize"];
     }
-
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -125,7 +123,6 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.contentInset = UIEdgeInsetsMake(20, 0, 0, 0);
     
-    // 修复：整理好括号，并使用 KVC 绕过低版本 SDK 的编译期检查
     if (@available(iOS 15.0, *)) {
         if ([self.tableView respondsToSelector:NSSelectorFromString(@"sectionHeaderTopPadding")]) {
             [self.tableView setValue:@(0) forKey:@"sectionHeaderTopPadding"];
@@ -362,6 +359,7 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
             [DYYYSettingItem itemWithTitle:@"双击面板长按面板" key:@"DYYYDoubleTapshowDislikeOnVideo" type:DYYYSettingItemTypeSwitch]
         ],
         @[
+            [DYYYSettingItem itemWithTitle:@"🎙️ 私信变声器" key:@"DYYYVoiceChangerType" type:DYYYSettingItemTypePicker],
             [DYYYSettingItem itemWithTitle:@"启用双击打开评论" key:@"DYYYEnableDoubleOpenComment" type:DYYYSettingItemTypeSwitch],
             [DYYYSettingItem itemWithTitle:@"启用双击打开菜单" key:@"DYYYEnableDoubleTapMenu" type:DYYYSettingItemTypeSwitch],
             [DYYYSettingItem itemWithTitle:@"启用自动勾选原图" key:@"DYYYAutoSelectOriginalPhoto" type:DYYYSettingItemTypeSwitch],
@@ -448,23 +446,28 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
 
 - (NSArray *)optionsForKey:(NSString *)key {
     if ([key isEqualToString:@"DYYYDefaultSpeed"] || [key isEqualToString:@"DYYYLongPressSpeed"]) {
-        // 倍速选项
         return @[ @0.75, @1.0, @1.25, @1.5, @2.0, @2.5, @3.0 ];
     } else if ([key isEqualToString:@"DYYYLiveQuality"]) {
-        // 直播清晰度选项
         return @[ @"蓝光帧彩", @"蓝光", @"超清", @"高清", @"标清", @"自动" ];
+    } else if ([key isEqualToString:@"DYYYVoiceChangerType"]) {
+        // 🔥 补齐：让变声器选项有这三个选项值
+        return @[ @0, @1, @2 ];
     }
     return @[];
 }
 
 - (NSString *)displayValueForKey:(NSString *)key value:(id)value {
     if ([key isEqualToString:@"DYYYDefaultSpeed"] || [key isEqualToString:@"DYYYLongPressSpeed"]) {
-        // 倍速显示格式
         float speedValue = [value floatValue];
         return [NSString stringWithFormat:@"%.2f", speedValue];
     } else if ([key isEqualToString:@"DYYYLiveQuality"]) {
-        // 直播清晰度直接显示
         return value ?: @"自动";
+    } else if ([key isEqualToString:@"DYYYVoiceChangerType"]) {
+        // 🔥 补齐：让变声器选项显示文字
+        NSInteger val = [value integerValue];
+        if (val == 1) return @"🎀 夹子/萝莉音";
+        if (val == 2) return @"🚬 沉稳大叔音";
+        return @"正常原声";
     }
     return [NSString stringWithFormat:@"%@", value];
 }
@@ -474,6 +477,9 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
         return @1.0;
     } else if ([key isEqualToString:@"DYYYLiveQuality"]) {
         return @"自动";
+    } else if ([key isEqualToString:@"DYYYVoiceChangerType"]) {
+        // 🔥 补齐：变声器默认关闭
+        return @0;
     }
     return nil;
 }
@@ -663,7 +669,6 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
 
         UILabel *pickerLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 80, 44)];
-        // 获取当前值
         id currentValue = [[NSUserDefaults standardUserDefaults] objectForKey:item.key];
         if (!currentValue) {
             currentValue = [self defaultValueForKey:item.key];
@@ -674,7 +679,6 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
         pickerLabel.textAlignment = NSTextAlignmentRight;
         pickerLabel.tag = indexPath.section * 1000 + indexPath.row;
 
-        // 添加垂直居中约束
         pickerLabel.translatesAutoresizingMaskIntoConstraints = NO;
         UIView *containerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 80, 44)];
         [containerView addSubview:pickerLabel];
@@ -685,6 +689,9 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
         ]];
 
         cell.accessoryView = containerView;
+    } else if (item.type == DYYYSettingItemTypeButton) {
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell.accessoryView = nil;
     }
 
     return cell;
@@ -716,10 +723,8 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
         UIAlertAction *action = [UIAlertAction actionWithTitle:title
                                                          style:UIAlertActionStyleDefault
                                                        handler:^(UIAlertAction *_Nonnull action) {
-                                                         // 保存到对应的key
                                                          [[NSUserDefaults standardUserDefaults] setObject:option forKey:item.key];
 
-                                                         // 更新对应的cell显示
                                                          UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
                                                          UIView *containerView = cell.accessoryView;
                                                          if (containerView && containerView.subviews.count > 0) {

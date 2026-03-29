@@ -1724,6 +1724,50 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 
 %end
 
+
+#import "DYYYVoiceChanger.h"
+
+// ==========================================
+// 🎙️ 私信实时变声器 (拦截音频发送)
+// ==========================================
+
+// 抖音 IM 底层负责发送消息的管理类 (不同版本可能叫 AWEIMMessageDataManager)
+%hook AWEIMMessageDataManager
+
+// 拦截发送音频文件的方法
+- (void)sendAudioMessageWithFilePath:(NSString *)filePath 
+                            duration:(NSTimeInterval)duration 
+                          completion:(id)completionBlock {
+    
+    // 1. 读取我们设置里的变声选项 (0=正常, 1=萝莉, 2=大叔)
+    NSInteger voiceType = [[NSUserDefaults standardUserDefaults] integerForKey:@"DYYYVoiceChangerType"];
+    
+    if (voiceType == 0) {
+        // 没开变声，直接走官方原有逻辑发送
+        %orig(filePath, duration, completionBlock);
+        return;
+    }
+    
+    // 2. 确定变声音调参数
+    float pitch = 0.0;
+    if (voiceType == 1) pitch = 1000.0; // 萝莉音 (升高 10 个半音)
+    if (voiceType == 2) pitch = -800.0; // 大叔音 (降低 8 个半音)
+    
+    // 3. 开始魔改音频！
+    [DYYYVoiceChanger processAudioAtPath:filePath withPitch:pitch completion:^(NSString *outputPath, NSError *error) {
+        if (outputPath && !error) {
+            // ✅ 变声成功！拿着新的假文件路径，调用原有的发送方法骗过抖音
+            %orig(outputPath, duration, completionBlock);
+        } else {
+            // ❌ 万一处理失败了，为了不耽误聊天，发送原语音
+            %orig(filePath, duration, completionBlock);
+        }
+    }];
+}
+
+%end
+
+
 // 屏蔽版本更新
 %hook AWEVersionUpdateManager
 
