@@ -1,1 +1,15 @@
-{ Filter = { Bundles = ( "com.ss.iphone.ugc.Aweme", "com.ss.iphone.ugc.aweme.lite" ); }; }
+{
+    Filter = {
+        Bundles = (
+            "com.ss.iphone.ugc.Aweme",
+            "com.ss.iphone.ugc.aweme.lite"
+        );
+        Executables = (
+            "Aweme",
+            "BIMCore",
+            "CoreIM",
+            "TuringIM",
+            "HTSVideoEditor"
+        );
+    };
+}

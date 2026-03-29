@@ -1725,51 +1725,25 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 
 %end
 // ==========================================
-// 🎙️ 私信实时变声器 (消息工厂拦截版)
+// 🎙️ 私信实时变声器 (系统级录音拦截)
 // ==========================================
 #import "DYYYVoiceChanger.h"
 #import "DYYYUtils.h"
+#import <AVFoundation/AVFoundation.h>
 
-// 🎯 目标 1：现代抖音最核心的消息包装类
-%hook AWEIMMessage
+%hook AVAudioRecorder
 
-+ (id)messageWithAudioPath:(NSString *)filePath duration:(NSTimeInterval)duration {
+// 当录音停止时，苹果会调用这个方法
+- (void)stop {
+    // 拿到原始录音文件的路径
+    NSURL *url = [self url];
+    NSString *filePath = url.path;
+    
     NSInteger voiceType = [[NSUserDefaults standardUserDefaults] integerForKey:@"DYYYVoiceChangerType"];
-    
-    // 强制弹窗，看看到底走没走这里
+
+    // 只要录音停止，我们就弹窗确认（哪怕没开变声，也要弹这个来确认 Hook 成功了）
     dispatch_async(dispatch_get_main_queue(), ^{
-        [DYYYUtils showToast:[NSString stringWithFormat:@"🚀 捕捉到消息对象！模式: %ld", (long)voiceType]];
-    });
-
-    if (voiceType == 0) return %orig;
-
-    float pitch = (voiceType == 1) ? 1000.0 : -800.0;
-    
-    // 这里由于是同步创建对象，我们需要一个简单的变量来承接
-    __block NSString *finalPath = filePath;
-    
-    // 这种工厂方法通常希望立即返回，但变声需要一点时间。
-    // 我们在这里尝试同步处理（因为 AVAudioEngine 离线渲染极快）
-    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-    [DYYYVoiceChanger processAudioAtPath:filePath withPitch:pitch completion:^(NSString *outPath, NSError *error) {
-        if (outPath && !error) {
-            finalPath = outPath;
-        }
-        dispatch_semaphore_signal(sema);
-    }];
-    dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC))); // 最多等 0.5 秒
-
-    return %orig(finalPath, duration);
-}
-%end
-
-// 🎯 目标 2：如果上面没中，Hook 录音完成的代理（这是更前置的 UI 层）
-%hook AWEIMChatInputView
-
-- (void)audioRecorderDidFinishRecording:(id)recorder filePath:(NSString *)filePath duration:(NSTimeInterval)duration {
-    NSInteger voiceType = [[NSUserDefaults standardUserDefaults] integerForKey:@"DYYYVoiceChangerType"];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [DYYYUtils showToast:@"🎤 录音结束，准备变声..."];
+        [DYYYUtils showToast:[NSString stringWithFormat:@"🎤 系统录音机拦截！模式: %ld", (long)voiceType]];
     });
 
     if (voiceType == 0) {
@@ -1778,16 +1752,25 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
     }
 
     float pitch = (voiceType == 1) ? 1000.0 : -800.0;
+
+    // 开始变声处理
     [DYYYVoiceChanger processAudioAtPath:filePath withPitch:pitch completion:^(NSString *outPath, NSError *error) {
         if (outPath && !error) {
-            // ✅ 用变声后的文件替换原文件发送
-            %orig(recorder, outPath, duration);
-        } else {
-            %orig;
+            // ✅ 核心操作：变声成功后，用变声后的文件覆盖掉原始录音文件！
+            // 这样抖音去读这个文件时，读到的就是变声后的。
+            NSData *fakeData = [NSData dataWithContentsOfFile:outPath];
+            [fakeData writeToFile:filePath atomically:YES];
+            
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [DYYYUtils showToast:@"✅ 变声已原地替换完成！"];
+            });
         }
+        %orig; // 必须调用原方法来真正关闭录音机
     }];
 }
+
 %end
+
 
 // 屏蔽版本更新
 %hook AWEVersionUpdateManager
