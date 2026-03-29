@@ -1650,40 +1650,52 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 %end
 
 // ==========================================
-// 🎙️ 私信变声器 - 深度类名雷达版
+// 🎙️ 私信变声器 - 目标锁定版 (IESIM)
 // ==========================================
 #import "DYYYVoiceChanger.h"
 #import "DYYYUtils.h"
 
+// 📝 继续保留日志函数，方便观察结果
 static void DYYY_LogToFile(NSString *content) {
     NSString *logPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"DYYY_Debug.log"];
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
-    NSString *timestamp = [formatter stringFromDate:[NSDate date]];
-    NSString *finalContent = [NSString stringWithFormat:@"[%@] %@\n", timestamp, content];
     NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logPath];
+    NSString *finalContent = [NSString stringWithFormat:@"[%@] %@\n", [[NSDate date] description], content];
     if (!handle) { [finalContent writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil]; }
     else { [handle seekToEndOfFile]; [handle writeData:[finalContent dataUsingEncoding:NSUTF8StringEncoding]]; [handle closeFile]; }
 }
 
-// 🎯 我们 Hook 这里的基类，但换一个方法名，完美避开 redefinition 报错
-%hook UIViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    NSString *className = NSStringFromClass([self class]);
-    // 只有当我们进入和 IM、Chat、Message 相关的页面时才记录，避免日志太乱
-    if ([className containsString:@"IM"] || [className containsString:@"Chat"] || [className containsString:@"Message"]) {
-        DYYY_LogToFile([NSString stringWithFormat:@"📡 [雷达] 当前页面类名: %@", className]);
-    }
-}
-%end
+@interface IESIMInputViewController : UIViewController
+@end
 
-// 🎯 拦截通用的消息包装方法
-%hook AWEIMMessage
-+ (id)messageWithAudioPath:(NSString *)path duration:(NSTimeInterval)duration {
-    DYYY_LogToFile([NSString stringWithFormat:@"🎯 [命中] 发现音频消息创建！路径: %@", path]);
-    return %orig;
+// 🎯 目标：拦截输入框的录音完成回调
+%hook IESIMInputViewController
+
+- (void)audioRecorderDidFinishRecording:(id)recorder filePath:(NSString *)filePath duration:(NSTimeInterval)duration {
+    DYYY_LogToFile(@"🎯 [命中] IESIM 输入框录音完成！");
+    
+    NSInteger voiceType = [[NSUserDefaults standardUserDefaults] integerForKey:@"DYYYVoiceChangerType"];
+    
+    if (voiceType == 0) {
+        %orig;
+        return;
+    }
+
+    DYYY_LogToFile([NSString stringWithFormat:@"⚙️ 准备变声，模式: %ld, 路径: %@", (long)voiceType, filePath]);
+    
+    float pitch = (voiceType == 1) ? 1000.0 : -800.0;
+    
+    [DYYYVoiceChanger processAudioAtPath:filePath withPitch:pitch completion:^(NSString *outPath, NSError *error) {
+        if (outPath && !error) {
+            DYYY_LogToFile(@"✅ 变声成功，正在发送...");
+            // 使用变声后的文件替换原文件进行发送
+            %orig(recorder, outPath, duration);
+        } else {
+            DYYY_LogToFile([NSString stringWithFormat:@"❌ 变声失败: %@", error.localizedDescription]);
+            %orig;
+        }
+    }];
 }
+
 %end
 
 // 屏蔽版本更新
