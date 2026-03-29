@@ -1548,30 +1548,35 @@ static void DYYY_CheckAndCaptureAudio(NSURL *URL, NSString *source) {
     
     NSString *lowerPath = path.lowercaseString;
     
-    // 🛑 黑名单：彻底屏蔽本地自己产生的文件
-    BOOL isMyOwnRecording = [lowerPath containsString:@"/tmp/"] || 
-                            [lowerPath containsString:@"record"] || 
-                            [lowerPath containsString:@"upload"] || 
-                            [lowerPath containsString:@"draft"] ||
-                            [lowerPath containsString:@"/documents/"]; // 自己录的通常在 Documents，下载的通常在 Caches
+    // 🛑 核心修复：精准黑名单。只屏蔽你的插件生成的临时文件和抖音自己刚录的文件
+    BOOL isMyOwnRecording = [lowerPath containsString:@"temp_trimmed"] ||  // 你裁剪的临时文件
+                            [lowerPath containsString:@"dyyy_"] ||         // 你变声器生成的文件(dyyy_changed / dyyy_fx)
+                            [lowerPath containsString:@"record"] ||        // 正在录制的文件
+                            [lowerPath containsString:@"upload"] ||        // 准备上传的文件
+                            [lowerPath containsString:@"draft"];           // 草稿箱
                             
-    if (isMyOwnRecording) return; // 是自己的直接放过
+    if (isMyOwnRecording) {
+        // NSLog(@"[DYYY_LOG] 🛡️ 屏蔽自己产生的文件: %@", path);
+        return; 
+    }
     
-    // ✅ 白名单：只抓取极大概率是下载下来的语音缓存
-    // 抖音的评论区语音路径通常包含 comment 或放在 Caches 目录下
-    if ([lowerPath containsString:@"comment"] ||
-        [lowerPath containsString:@"im_audio"] ||
-        [lowerPath containsString:@"chat"] ||
-        [lowerPath containsString:@"/library/caches/"]) {
-        
-        // 进一步确认它是个音频，而不是图片等其他缓存
+    // ✅ 核心修复：扩大白名单。私信在 attachment，评论区通常在 cache
+    BOOL isTargetAudio = [lowerPath containsString:@"cache"] ||
+                         [lowerPath containsString:@"attachment"] ||
+                         [lowerPath containsString:@"comment"] ||
+                         [lowerPath containsString:@"im_audio"] ||
+                         [lowerPath containsString:@"chat"];
+                         
+    if (isTargetAudio) {
+        // 进一步确认它是音频格式，而不是图片缓存
         if ([lowerPath.pathExtension isEqualToString:@"m4a"] ||
             [lowerPath.pathExtension isEqualToString:@"aac"] ||
             [lowerPath.pathExtension isEqualToString:@"mp3"] ||
-            // 抖音很多缓存文件没后缀，但路径里会有 audio 字样
-            [lowerPath containsString:@"audio"]) {
+            [lowerPath.pathExtension isEqualToString:@"wav"] ||
+            [lowerPath containsString:@"audio"]) { // 很多缓存没后缀，但名字带有 audio
             
             g_lastCapturedAudioPath = path;
+            // 打印出来方便我们排查
             NSLog(@"[DYYY_LOG] 🎯 [%@] 成功捕获他人/评论语音: %@", source, path);
         }
     }
