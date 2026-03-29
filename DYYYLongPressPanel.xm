@@ -1538,13 +1538,16 @@
 
 
 // ==========================================
-// 🚀 评论区/私信语音提取模块 (支持网络流媒体版)
+// 🚀 评论区/私信语音提取模块 (终极全覆盖修复版)
 // ==========================================
 static NSString *g_lastCapturedAudioPath = nil;
+static BOOL g_isLastCapturedNetwork = NO; // 显式标记当前抓到的是否为网络流
 
 static void DYYY_CheckAndCaptureAudio(NSURL *URL, NSString *source) {
     if (!URL) return;
+    
     NSString *urlStr = URL.absoluteString;
+    NSString *localPath = URL.path; // 纯粹的本地路径，没有 file:// 前缀
     NSString *lowerStr = urlStr.lowercaseString;
     
     // 🛑 核心黑名单：屏蔽自己录制的、裁剪的、变声的文件
@@ -1556,102 +1559,140 @@ static void DYYY_CheckAndCaptureAudio(NSURL *URL, NSString *source) {
         return;
     }
     
-    // ✅ 白名单：本地缓存(私信) OR 网络流媒体(评论区)
-    BOOL isLocalTarget = [lowerStr containsString:@"cache"] ||
+    BOOL isNetwork = [lowerStr hasPrefix:@"http"];
+    // 扩大本地白名单，防漏抓
+    BOOL isLocalTarget = localPath && (
+                         [lowerStr containsString:@"cache"] ||
                          [lowerStr containsString:@"attachment"] ||
                          [lowerStr containsString:@"comment"] ||
                          [lowerStr containsString:@"im_audio"] ||
-                         [lowerStr containsString:@"chat"];
+                         [lowerStr containsString:@"chat"] ||
+                         [lowerStr containsString:@"audio"]); 
                          
-    BOOL isNetwork = [lowerStr hasPrefix:@"http"]; // 抖音的评论语音大部分走网络流
-    
-    if (isLocalTarget || isNetwork) {
-        // 过滤掉视频和图片，剩下的就是纯音频流
-        if (![lowerStr containsString:@".mp4"] &&
-            ![lowerStr containsString:@".jpg"] &&
-            ![lowerStr containsString:@".png"] &&
-            ![lowerStr containsString:@".webp"]) {
-            
-            g_lastCapturedAudioPath = urlStr;
-            // NSLog(@"[DYYY_LOG] 🎯 [%@] 捕获目标: %@", source, urlStr);
-        }
+    // 过滤掉明显的非音频文件 (视频/图片)
+    if ([lowerStr containsString:@".mp4"] ||
+        [lowerStr containsString:@".jpg"] ||
+        [lowerStr containsString:@".png"] ||
+        [lowerStr containsString:@".webp"] ||
+        [lowerStr containsString:@".gif"]) {
+        return;
+    }
+
+    // 🎯 记录路径并区分网络/本地
+    if (isNetwork && [lowerStr containsString:@"audio"]) { 
+        // 针对网络流，必须带有 audio 关键词，防止抓到网页请求
+        g_lastCapturedAudioPath = urlStr;
+        g_isLastCapturedNetwork = YES;
+    } else if (isLocalTarget) {
+        // ⚠️ 修复私信 Bug：本地文件必须存纯路径 localPath，不能存 urlStr
+        g_lastCapturedAudioPath = localPath; 
+        g_isLastCapturedNetwork = NO;
     }
 }
 
+// --- 🎯 全面拦截 AVFoundation 的初始化与类方法 (防止漏网) ---
+
 %hook AVPlayerItem
 - (instancetype)initWithURL:(NSURL *)URL {
-    DYYY_CheckAndCaptureAudio(URL, @"AVPlayerItem");
+    DYYY_CheckAndCaptureAudio(URL, @"AVPlayerItem_Init");
+    return %orig;
+}
++ (instancetype)playerItemWithURL:(NSURL *)URL {
+    DYYY_CheckAndCaptureAudio(URL, @"AVPlayerItem_Class");
+    return %orig;
+}
+%end
+
+%hook AVPlayer
+- (instancetype)initWithURL:(NSURL *)URL {
+    DYYY_CheckAndCaptureAudio(URL, @"AVPlayer_Init");
+    return %orig;
+}
++ (instancetype)playerWithURL:(NSURL *)URL {
+    DYYY_CheckAndCaptureAudio(URL, @"AVPlayer_Class");
     return %orig;
 }
 %end
 
 %hook AVAudioPlayer
 - (id)initWithContentsOfURL:(NSURL *)url error:(NSError **)outError {
-    DYYY_CheckAndCaptureAudio(url, @"AVAudioPlayer");
+    DYYY_CheckAndCaptureAudio(url, @"AVAudioPlayer_Init");
     return %orig;
 }
 %end
 
 %hook AVURLAsset
 - (id)initWithURL:(NSURL *)URL options:(NSDictionary<NSString *,id> *)options {
-    DYYY_CheckAndCaptureAudio(URL, @"AVURLAsset");
+    DYYY_CheckAndCaptureAudio(URL, @"AVURLAsset_Init");
+    return %orig;
+}
++ (instancetype)URLAssetWithURL:(NSURL *)URL options:(NSDictionary<NSString *,id> *)options {
+    DYYY_CheckAndCaptureAudio(URL, @"AVURLAsset_Class");
     return %orig;
 }
 %end
 
 
 // ==========================================
-// 📱 物理外挂：摇一摇手机触发导出逻辑 (网络自适应版)
+// 📱 摇一摇触发导出 (网络与本地智能分发版)
 // ==========================================
 %hook UIWindow
 - (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event {
     if (motion == UIEventSubtypeMotionShake && g_lastCapturedAudioPath) {
         
         NSString *targetDir = [[DYYYAudioManager sharedManager] voiceDirectory];
+        NSString *ext = @"aac"; // 默认 aac
         
-        // 提取后缀，如果是网络流没有后缀，强行赋予 aac
-        NSString *ext = @"aac";
-        if (g_lastCapturedAudioPath.pathExtension.length > 0 && ![g_lastCapturedAudioPath.pathExtension containsString:@"tmp"]) {
+        if (!g_isLastCapturedNetwork && g_lastCapturedAudioPath.pathExtension.length > 0) {
             ext = g_lastCapturedAudioPath.pathExtension.lowercaseString;
+        } else if (g_isLastCapturedNetwork && [[NSURL URLWithString:g_lastCapturedAudioPath] pathExtension].length > 0) {
+            ext = [[NSURL URLWithString:g_lastCapturedAudioPath] pathExtension].lowercaseString;
         }
+        if ([ext containsString:@"tmp"]) ext = @"aac";
         
         NSString *fileName = [NSString stringWithFormat:@"提取语音_%ld.%@", (long)[[NSDate date] timeIntervalSince1970], ext];
         NSString *targetPath = [targetDir stringByAppendingPathComponent:fileName];
         
-        // 🌐 场景 1：如果是网络链接 (评论区语音)
-        if ([g_lastCapturedAudioPath hasPrefix:@"http"]) {
+        // 🌐 场景 1：网络下载 (评论区)
+        if (g_isLastCapturedNetwork) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [DYYYUtils showToast:@"⏳ 正在下载网络语音..."];
             });
             
-            // 异步后台下载，防止卡死 UI
+            NSString *downloadUrl = g_lastCapturedAudioPath; // 备份URL防止被覆盖
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                NSData *audioData = [NSData dataWithContentsOfURL:[NSURL URLWithString:g_lastCapturedAudioPath]];
+                NSData *audioData = [NSData dataWithContentsOfURL:[NSURL URLWithString:downloadUrl]];
                 
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (audioData && [audioData writeToFile:targetPath atomically:YES]) {
-                        [DYYYUtils showToast:@"✅ 摇一摇：评论语音已成功下载至助手！"];
-                        g_lastCapturedAudioPath = nil; // 导出成功后清空
+                        [DYYYUtils showToast:@"✅ 摇一摇：评论语音已下载至助手！"];
+                        g_lastCapturedAudioPath = nil; 
                     } else {
-                        [DYYYUtils showToast:@"❌ 语音下载失败，请重新播放一次再摇"];
+                        [DYYYUtils showToast:@"❌ 语音下载失败，请重新播放"];
                     }
                 });
             });
             
         } 
-        // 📁 场景 2：如果是本地文件 (私信语音)
-        else if ([[NSFileManager defaultManager] fileExistsAtPath:g_lastCapturedAudioPath]) {
-            NSError *error = nil;
-            [[NSFileManager defaultManager] copyItemAtPath:g_lastCapturedAudioPath toPath:targetPath error:&error];
-            
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (!error) {
-                    [DYYYUtils showToast:@"✅ 摇一摇：私信语音已成功提取至助手！"];
-                    g_lastCapturedAudioPath = nil;
-                } else {
-                    [DYYYUtils showToast:@"❌ 本地导出失败"];
-                }
-            });
+        // 📁 场景 2：本地拷贝 (私信)
+        else {
+            if ([[NSFileManager defaultManager] fileExistsAtPath:g_lastCapturedAudioPath]) {
+                NSError *error = nil;
+                [[NSFileManager defaultManager] copyItemAtPath:g_lastCapturedAudioPath toPath:targetPath error:&error];
+                
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (!error) {
+                        [DYYYUtils showToast:@"✅ 摇一摇：私信语音已提取至助手！"];
+                        g_lastCapturedAudioPath = nil;
+                    } else {
+                        [DYYYUtils showToast:@"❌ 本地提取失败"];
+                    }
+                });
+            } else {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [DYYYUtils showToast:@"❌ 本地文件不存在或已失效"];
+                });
+            }
         }
     }
     %orig;
