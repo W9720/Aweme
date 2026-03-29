@@ -1537,66 +1537,69 @@
 %end
 
 // ==========================================
-// 🚀 私信语音提取模块 (底层拦截 + 防误伤黑名单版)
+// 🚀 评论区/私信语音提取模块 (精准截获播放源)
 // ==========================================
 static NSString *g_lastCapturedAudioPath = nil;
 
-%hook AVURLAsset
-- (id)initWithURL:(NSURL *)URL options:(NSDictionary<NSString *,id> *)options {
+// 封装一个通用的路径判断逻辑，避免重复代码
+static void DYYY_CheckAndCaptureAudio(NSURL *URL, NSString *source) {
     NSString *path = URL.path;
-    if (path) {
-        NSString *lowerPath = path.lowercaseString;
+    if (!path) return;
+    
+    NSString *lowerPath = path.lowercaseString;
+    
+    // 🛑 黑名单：彻底屏蔽本地自己产生的文件
+    BOOL isMyOwnRecording = [lowerPath containsString:@"/tmp/"] || 
+                            [lowerPath containsString:@"record"] || 
+                            [lowerPath containsString:@"upload"] || 
+                            [lowerPath containsString:@"draft"] ||
+                            [lowerPath containsString:@"/documents/"]; // 自己录的通常在 Documents，下载的通常在 Caches
+                            
+    if (isMyOwnRecording) return; // 是自己的直接放过
+    
+    // ✅ 白名单：只抓取极大概率是下载下来的语音缓存
+    // 抖音的评论区语音路径通常包含 comment 或放在 Caches 目录下
+    if ([lowerPath containsString:@"comment"] ||
+        [lowerPath containsString:@"im_audio"] ||
+        [lowerPath containsString:@"chat"] ||
+        [lowerPath containsString:@"/library/caches/"]) {
         
-        // 🛑 核心修复：定义路径黑名单 (拦截自己刚录制的临时文件)
-        BOOL isMyOwnRecording = [lowerPath containsString:@"/tmp/"] || 
-                                [lowerPath containsString:@"record"] || 
-                                [lowerPath containsString:@"upload"] || 
-                                [lowerPath containsString:@"draft"];
-        
-        // 只有【不是自己的临时录音】，且【符合音频特征】的，才记录！
-        if (!isMyOwnRecording) {
-            if ([lowerPath.pathExtension isEqualToString:@"m4a"] ||
-                [lowerPath.pathExtension isEqualToString:@"aac"] ||
-                [lowerPath containsString:@"im_audio"] ||
-                [lowerPath containsString:@"chat"]) {
-                
-                g_lastCapturedAudioPath = path;
-                // NSLog(@"[DYYY_LOG] 🎯 成功捕获他人语音: %@", path);
-            }
+        // 进一步确认它是个音频，而不是图片等其他缓存
+        if ([lowerPath.pathExtension isEqualToString:@"m4a"] ||
+            [lowerPath.pathExtension isEqualToString:@"aac"] ||
+            [lowerPath.pathExtension isEqualToString:@"mp3"] ||
+            // 抖音很多缓存文件没后缀，但路径里会有 audio 字样
+            [lowerPath containsString:@"audio"]) {
+            
+            g_lastCapturedAudioPath = path;
+            NSLog(@"[DYYY_LOG] 🎯 [%@] 成功捕获他人/评论语音: %@", source, path);
         }
     }
+}
+
+// 🎯 拦截 1：主流网络音频播放核心类 (最容易抓到评论区播放)
+%hook AVPlayerItem
+- (instancetype)initWithURL:(NSURL *)URL {
+    DYYY_CheckAndCaptureAudio(URL, @"AVPlayerItem");
     return %orig;
 }
 %end
 
+// 🎯 拦截 2：本地音频播放核心类
 %hook AVAudioPlayer
 - (id)initWithContentsOfURL:(NSURL *)url error:(NSError **)outError {
-    NSString *path = url.path;
-    if (path) {
-        NSString *lowerPath = path.lowercaseString;
-        
-        // 🛑 同样的黑名单逻辑
-        BOOL isMyOwnRecording = [lowerPath containsString:@"/tmp/"] || 
-                                [lowerPath containsString:@"record"] || 
-                                [lowerPath containsString:@"upload"] || 
-                                [lowerPath containsString:@"draft"];
-                                
-        if (!isMyOwnRecording) {
-            if ([lowerPath.pathExtension isEqualToString:@"m4a"] ||
-                [lowerPath.pathExtension isEqualToString:@"aac"] ||
-                [lowerPath containsString:@"im_audio"] ||
-                [lowerPath containsString:@"chat"]) {
-                
-                g_lastCapturedAudioPath = path;
-                // NSLog(@"[DYYY_LOG] 🎯 成功捕获他人语音: %@", path);
-            }
-        }
-    }
+    DYYY_CheckAndCaptureAudio(url, @"AVAudioPlayer");
     return %orig;
 }
 %end
 
-
+// 🎯 拦截 3：读取媒体信息 (保留但加上了严格的黑名单，防误伤自己)
+%hook AVURLAsset
+- (id)initWithURL:(NSURL *)URL options:(NSDictionary<NSString *,id> *)options {
+    DYYY_CheckAndCaptureAudio(URL, @"AVURLAsset");
+    return %orig;
+}
+%end
 
 // ==========================================
 // 📱 物理外挂：摇一摇手机触发导出逻辑 (修复播放无声版)
