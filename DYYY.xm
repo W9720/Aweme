@@ -1541,6 +1541,63 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 }
 %end
 
+// ==========================================
+// 👻 抖音直播间全局隐身模式 (强化版)
+// ==========================================
+
+// 1. 最核心：直播间内部真正使用的用户模型 (HTSLive 开头)
+%hook HTSLiveUser
+
+- (BOOL)secret {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYLiveGhostMode"]) return YES;
+    return %orig;
+}
+
+- (BOOL)isSecret {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYLiveGhostMode"]) return YES;
+    return %orig;
+}
+
+// 强制不显示自己的任何进场动效
+- (BOOL)displayEntranceEffect {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYLiveGhostMode"]) return NO;
+    return %orig;
+}
+
+%end
+
+
+// 2. 外部通用模型 (原有的防御机制，保留)
+%hook IESLiveUserModel
+
+- (BOOL)secret {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYLiveGhostMode"]) return YES;
+    return %orig;
+}
+
+- (BOOL)isSecret {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYLiveGhostMode"]) return YES;
+    return %orig;
+}
+
+- (BOOL)displayEntranceEffect {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYLiveGhostMode"]) return NO;
+    return %orig;
+}
+
+%end
+
+
+// 3. 抖音基础用户模型
+%hook AWEUserModel
+
+- (BOOL)isSecret {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYLiveGhostMode"]) return YES;
+    return %orig;
+}
+
+%end
+
 // 屏蔽版本更新
 %hook AWEVersionUpdateManager
 

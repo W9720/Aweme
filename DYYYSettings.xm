@@ -1936,6 +1936,11 @@ void showDYYYSettingsVC(UIViewController *rootVC, BOOL hasAgreed) {
             @"detail" : @"",
             @"cellType" : @6,
             @"imageName" : @"ic_circlearrowin_outlined_20"},
+            @{@"identifier" : @"DYYYLiveGhostMode",
+            @"title" : @"开启直播间隐身",
+            @"detail" : @"不发送入场通知，隐藏观众列表",
+            @"cellType" : @6,
+            @"imageName" : @"ic_circlearrowin_outlined_20"}, // 闭眼的图标，很契合隐身
           @{@"identifier" : @"DYYYLongPressSaveCurrentImage",
             @"title" : @"长按保存当前图片",
             @"detail" : @"",
