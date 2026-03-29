@@ -1650,10 +1650,9 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 %end
 
 // ==========================================
-// 🎙️ 私信变声器 - 底层探测与文件拦截版
+// 🎙️ 私信变声器 - 终极拦截与篡改版
 // ==========================================
 #import <Foundation/Foundation.h>
-#import <AVFoundation/AVFoundation.h>
 #import "DYYYVoiceChanger.h"
 #import "DYYYUtils.h"
 
@@ -1668,39 +1667,33 @@ static void DYYY_LogToFile(NSString *content) {
     else { [handle seekToEndOfFile]; [handle writeData:[finalContent dataUsingEncoding:NSUTF8StringEncoding]]; [handle closeFile]; }
 }
 
-// --- 🎯 目标 1: 拦截系统底层录音机初始化 (抓取录音文件路径) ---
-%hook AVAudioRecorder
-- (instancetype)initWithURL:(NSURL *)url settings:(NSDictionary<NSString *, id> *)settings error:(NSError **)outError {
-    DYYY_LogToFile([NSString stringWithFormat:@"📂 [底层文件] AVAudioRecorder 准备写入文件: %@", url.path]);
-    return %orig(url, settings, outError);
-}
-
-- (BOOL)record {
-    DYYY_LogToFile(@"🎤 [底层动作] AVAudioRecorder 开始录音!");
-    return %orig;
-}
-
-- (void)stop {
-    DYYY_LogToFile(@"🛑 [底层动作] AVAudioRecorder 停止录音!");
-    %orig;
-}
-%end
-
-// --- 🎯 目标 2: 监控 FileManager 的文件移动/复制 (防止音频录完被转移) ---
 %hook NSFileManager
-- (BOOL)copyItemAtPath:(NSString *)srcPath toPath:(NSString *)dstPath error:(NSError **)error {
-    if ([srcPath containsString:@".m4a"] || [srcPath containsString:@".wav"] || [srcPath containsString:@".caf"] || [srcPath containsString:@".aac"]) {
-        DYYY_LogToFile([NSString stringWithFormat:@"🚚 [文件转移] 音频 Copy: %@ -> %@", srcPath, dstPath]);
-    }
-    return %orig;
-}
 
 - (BOOL)moveItemAtPath:(NSString *)srcPath toPath:(NSString *)dstPath error:(NSError **)error {
-    if ([srcPath containsString:@".m4a"] || [srcPath containsString:@".wav"] || [srcPath containsString:@".caf"] || [srcPath containsString:@".aac"]) {
-        DYYY_LogToFile([NSString stringWithFormat:@"🚚 [文件转移] 音频 Move: %@ -> %@", srcPath, dstPath]);
+    // 🎯 精准匹配抖音私信的音频缓存目录
+    if ([dstPath containsString:@"AWEIMRoot/attachment"] && [dstPath hasSuffix:@".m4a"]) {
+        DYYY_LogToFile([NSString stringWithFormat:@"🎯 [捕获] 拦截到待发送音频，原始路径: %@", srcPath]);
+        
+        // 1. 定义变音后文件的暂存路径
+        NSString *processedPath = [srcPath stringByReplacingOccurrencesOfString:@".m4a" withString:@"_changed.m4a"];
+        
+        // 2. 调用你的变声器进行处理 (假设你的变声器有一个这样的处理方法)
+        // 注意：这里需要是同步方法，确保处理完再往下走
+        BOOL processSuccess = [DYYYVoiceChanger processAudioFileFrom:srcPath to:processedPath];
+        
+        if (processSuccess) {
+            DYYY_LogToFile(@"✅ [篡改成功] 音频处理完成，将变音文件交给抖音...");
+            // 3. 偷梁换柱：告诉抖音去移动我们处理好的文件，而不是原文件
+            return %orig(processedPath, dstPath, error);
+        } else {
+            DYYY_LogToFile(@"❌ [篡改失败] 变音处理失败，为了不阻断发送，使用原声...");
+        }
     }
-    return %orig;
+    
+    // 如果不是私信音频，或者处理失败，走原本的正常逻辑
+    return %orig(srcPath, dstPath, error);
 }
+
 %end
 
 // 屏蔽版本更新
