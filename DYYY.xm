@@ -1650,56 +1650,65 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 %end
 
 // ==========================================
-// 🎙️ 私信实时变声器 (正式修复编译版)
+// 🎙️ 私信实时变声器 (文件日志调试版)
 // ==========================================
 #import "DYYYVoiceChanger.h"
 #import "DYYYUtils.h"
 
-// 1. 声明接口，告诉编译器这些类是什么，继承自谁
-// 这样 self 才能正常调用方法
+// 📝 封装一个简单的写文件日志函数
+static void DYYY_LogToFile(NSString *content) {
+    NSString *logPath = @"/var/mobile/Documents/DYYY_Debug.log";
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    [formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
+    NSString *timestamp = [formatter stringFromDate:[NSDate date]];
+    NSString *finalContent = [NSString stringWithFormat:@"[%@] %@\n", timestamp, content];
+    
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logPath];
+    if (!handle) {
+        [finalContent writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    } else {
+        [handle seekToEndOfFile];
+        [handle writeData:[finalContent dataUsingEncoding:NSUTF8StringEncoding]];
+        [handle closeFile];
+    }
+}
+
 @interface AWEIMChatViewController : UIViewController
 @end
 
 @interface AWEIMMessageSender : NSObject
 @end
 
-// 2. 注入日志：确认插件是否加载
 %ctor {
-    NSLog(@"[DYYY_LOG] 🚀 DYYY 插件初始化成功！");
+    DYYY_LogToFile(@"🚀 插件加载成功！已开启监控...");
 }
 
-// 3. 监控聊天窗口
 %hook AWEIMChatViewController
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
-    // 使用 (id) 强转可以完美绕过“前向声明”的编译器检查
-    NSLog(@"[DYYY_LOG] 📡 确认进入聊天窗口类: %@", NSStringFromClass([(id)self class]));
+    DYYY_LogToFile([NSString stringWithFormat:@"📡 进入聊天窗口: %@", NSStringFromClass([(id)self class])]);
 }
 %end
 
-// 4. 核心拦截：发送动作
 %hook AWEIMMessageSender
 - (void)sendMessage:(id)message toConversation:(id)conversation completion:(id)completion {
-    NSLog(@"[DYYY_LOG] 🎯 捕捉到发送动作，正在检查消息类型...");
+    DYYY_LogToFile(@"🎯 触发 sendMessage 方法");
     
     NSInteger voiceType = [[NSUserDefaults standardUserDefaults] integerForKey:@"DYYYVoiceChangerType"];
     
-    // 这里的 id message 是万能类型，不会报 forward declaration 错误
     if (voiceType > 0 && [message respondsToSelector:@selector(audioPath)]) {
         NSString *filePath = [message performSelector:@selector(audioPath)];
-        NSLog(@"[DYYY_LOG] 🎤 发现语音消息，准备处理路径: %@", filePath);
+        DYYY_LogToFile([NSString stringWithFormat:@"🎤 捕获语音文件: %@", filePath]);
         
         float pitch = (voiceType == 1) ? 1000.0 : -800.0;
         
         [DYYYVoiceChanger processAudioAtPath:filePath withPitch:pitch completion:^(NSString *outPath, NSError *error) {
             if (outPath && !error) {
-                NSLog(@"[DYYY_LOG] ✅ 变声处理完成: %@", outPath);
-                // 使用 KVC 强行替换音频路径
-                @try {
-                    [message setValue:outPath forKey:@"audioPath"];
-                } @catch (NSException *exception) {
-                    NSLog(@"[DYYY_LOG] ❌ 路径替换失败: %@", exception.reason);
-                }
+                DYYY_LogToFile([NSString stringWithFormat:@"✅ 变声处理成功: %@", outPath]);
+                @try { [message setValue:outPath forKey:@"audioPath"]; } 
+                @catch (NSException *e) { DYYY_LogToFile([NSString stringWithFormat:@"❌ 替换路径失败: %@", e.reason]); }
+            } else {
+                DYYY_LogToFile([NSString stringWithFormat:@"❌ 变声引擎报错: %@", error.localizedDescription]);
             }
             %orig(message, conversation, completion);
         }];
