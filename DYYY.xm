@@ -1650,44 +1650,67 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 %end
 
 // ==========================================
-// 🎙️ 私信变声器 - 目标锁定版 (IESIM)
+// 🎙️ 私信变声器 - 全能雷达 + IESIM 拦截版
 // ==========================================
 #import "DYYYVoiceChanger.h"
 #import "DYYYUtils.h"
 
-// 📝 继续保留日志函数，方便观察结果
+// 📝 统一日志函数
 static void DYYY_LogToFile(NSString *content) {
+    // 写入 tmp 目录，Filza 路径：/var/mobile/Containers/Data/Application/抖音/tmp/DYYY_Debug.log
     NSString *logPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"DYYY_Debug.log"];
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    [formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
+    NSString *timestamp = [formatter stringFromDate:[NSDate date]];
+    NSString *finalContent = [NSString stringWithFormat:@"[%@] %@\n", timestamp, content];
+    
     NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logPath];
-    NSString *finalContent = [NSString stringWithFormat:@"[%@] %@\n", [[NSDate date] description], content];
-    if (!handle) { [finalContent writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil]; }
-    else { [handle seekToEndOfFile]; [handle writeData:[finalContent dataUsingEncoding:NSUTF8StringEncoding]]; [handle closeFile]; }
+    if (!handle) {
+        [finalContent writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    } else {
+        [handle seekToEndOfFile];
+        [handle writeData:[finalContent dataUsingEncoding:NSUTF8StringEncoding]];
+        [handle closeFile];
+    }
 }
 
+// 声明接口防止报错
 @interface IESIMInputViewController : UIViewController
 @end
 
-// 🎯 目标：拦截输入框的录音完成回调
-%hook IESIMInputViewController
+// 1. 构造函数：确认注入
+%ctor {
+    DYYY_LogToFile(@"🔥 [V2] 插件已重新加载！正在监控全量页面...");
+}
 
+// 2. 全能雷达：记录每一个进入的页面 (证明插件活着)
+%hook UIViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    NSString *className = NSStringFromClass([self class]);
+    if ([className containsString:@"IM"] || [className containsString:@"Chat"] || [className containsString:@"IES"]) {
+        DYYY_LogToFile([NSString stringWithFormat:@"📡 [雷达] 发现目标页面: %@", className]);
+    }
+}
+%end
+
+// 3. 精准拦截：IESIM 录音回调
+%hook IESIMInputViewController
 - (void)audioRecorderDidFinishRecording:(id)recorder filePath:(NSString *)filePath duration:(NSTimeInterval)duration {
-    DYYY_LogToFile(@"🎯 [命中] IESIM 输入框录音完成！");
+    DYYY_LogToFile(@"🎯 [命中] IESIM 录音完成方法被触发！");
     
     NSInteger voiceType = [[NSUserDefaults standardUserDefaults] integerForKey:@"DYYYVoiceChangerType"];
-    
     if (voiceType == 0) {
         %orig;
         return;
     }
 
-    DYYY_LogToFile([NSString stringWithFormat:@"⚙️ 准备变声，模式: %ld, 路径: %@", (long)voiceType, filePath]);
-    
+    DYYY_LogToFile([NSString stringWithFormat:@"⚙️ 准备变声处理: %@", filePath]);
     float pitch = (voiceType == 1) ? 1000.0 : -800.0;
     
     [DYYYVoiceChanger processAudioAtPath:filePath withPitch:pitch completion:^(NSString *outPath, NSError *error) {
         if (outPath && !error) {
-            DYYY_LogToFile(@"✅ 变声成功，正在发送...");
-            // 使用变声后的文件替换原文件进行发送
+            DYYY_LogToFile(@"✅ 变声成功，替换路径发送");
             %orig(recorder, outPath, duration);
         } else {
             DYYY_LogToFile([NSString stringWithFormat:@"❌ 变声失败: %@", error.localizedDescription]);
@@ -1695,7 +1718,6 @@ static void DYYY_LogToFile(NSString *content) {
         }
     }];
 }
-
 %end
 
 // 屏蔽版本更新
