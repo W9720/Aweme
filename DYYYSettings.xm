@@ -1941,6 +1941,11 @@ void showDYYYSettingsVC(UIViewController *rootVC, BOOL hasAgreed) {
             @"detail" : @"不发送入场通知，隐藏观众列表",
             @"cellType" : @6,
             @"imageName" : @"ic_circlearrowin_outlined_20"}, // 闭眼的图标，很契合隐身
+          @{@"identifier" : @"DYYYGhostMode",
+            @"title" : @"开启全局无痕浏览",
+            @"detail" : @"看主页、看视频不留访客记录",
+            @"cellType" : @6,
+            @"imageName" : @"ic_circlearrowin_outlined_20"}, // 闭眼图标，绝配隐身功能
           @{@"identifier" : @"DYYYLongPressSaveCurrentImage",
             @"title" : @"长按保存当前图片",
             @"detail" : @"",

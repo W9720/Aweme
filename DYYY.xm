@@ -1598,6 +1598,56 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 
 %end
 
+// ==========================================
+// 🥷 全局无痕浏览模式 (拦截字节跳动底层埋点 SDK)
+// ==========================================
+
+// 核心拦截点：字节跳动现代标准埋点协议
+%hook BDTrackerProtocol
+
++ (void)eventV3:(NSString *)event params:(NSDictionary *)params {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYGhostMode"]) {
+        
+        // 核心拦截词库 (涵盖抖音各种版本的主页访问上报)
+        NSArray *blockedEvents = @[
+            @"enter_personal_detail", // 进入别人主页
+            @"profile_pv",            // 增加主页浏览量
+            @"others_homepage",       // 他人主页互动
+            @"visit_profile",         // 访问主页
+            @"shoot_record_play"      // 朋友视频播放记录
+        ];
+        
+        if ([blockedEvents containsObject:event]) {
+            // 🕵️ 触发无痕：直接 `return` 丢弃该数据包，假装无事发生
+            return;
+        }
+    }
+    // 其他正常事件（比如点赞、评论）放行，防止号被风控
+    %orig;
+}
+
+%end
+
+// 双重保险：兼容抖音部分老版本或混合使用的经典 Tracker
+%hook Tracker
+
++ (void)event:(NSString *)event params:(NSDictionary *)params {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYGhostMode"]) {
+        NSArray *blockedEvents = @[
+            @"enter_personal_detail",
+            @"profile_pv",
+            @"others_homepage",
+            @"visit_profile"
+        ];
+        if ([blockedEvents containsObject:event]) {
+            return;
+        }
+    }
+    %orig;
+}
+
+%end
+
 // 屏蔽版本更新
 %hook AWEVersionUpdateManager
 
