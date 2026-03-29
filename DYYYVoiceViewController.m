@@ -3,6 +3,7 @@
 #import "DYYYUtils.h"
 #import <AVFoundation/AVFoundation.h> 
 #import <objc/runtime.h>
+#import "DYYYVoiceChanger.h"
 
 // 🔥 终极性能优化：新增全局静态内存变量，极速读取，0 CPU 消耗，防止高频拦截导致抖音被系统强杀
 static BOOL g_isArmed = NO;
