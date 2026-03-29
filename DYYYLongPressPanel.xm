@@ -9,6 +9,7 @@
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
 #import "DYYYVoiceViewController.h"
+#import <AVFoundation/AVFoundation.h>
 
 // ==========================================
 // 完美声明区
@@ -1535,6 +1536,103 @@
 }
 %end
 
+// ==========================================
+// 🚀 私信语音提取模块 (底层拦截 + 原生菜单强注)
+// ==========================================
+static NSString *g_lastCapturedAudioPath = nil;
+
+%hook AVURLAsset
+- (id)initWithURL:(NSURL *)URL options:(NSDictionary<NSString *,id> *)options {
+    NSString *path = URL.path;
+    if (path && ([path.pathExtension.lowercaseString isEqualToString:@"m4a"] ||
+                 [path.pathExtension.lowercaseString isEqualToString:@"aac"] ||
+                 [path.lowercaseString containsString:@"im_audio"] ||
+                 [path.lowercaseString containsString:@"chat"])) {
+        g_lastCapturedAudioPath = path;
+    }
+    return %orig;
+}
+%end
+
+%hook AVAudioPlayer
+- (id)initWithContentsOfURL:(NSURL *)url error:(NSError **)outError {
+    NSString *path = url.path;
+    if (path && ([path.pathExtension.lowercaseString isEqualToString:@"m4a"] ||
+                 [path.pathExtension.lowercaseString isEqualToString:@"aac"] ||
+                 [path.lowercaseString containsString:@"im_audio"] ||
+                 [path.lowercaseString containsString:@"chat"])) {
+        g_lastCapturedAudioPath = path;
+    }
+    return %orig;
+}
+%end
+
+%hook UIMenuController
+- (void)setMenuItems:(NSArray *)items {
+    UIViewController *topVC = [DYYYUtils topView];
+    NSString *vcName = NSStringFromClass([topVC class]);
+    
+    // 仅在私信/聊天相关的界面触发
+    if ([vcName containsString:@"IM"] || [vcName containsString:@"Chat"] || [vcName containsString:@"Message"]) {
+        NSMutableArray *newItems = items ? [NSMutableArray arrayWithArray:items] : [NSMutableArray array];
+        BOOL hasExport = NO;
+        for (UIMenuItem *item in newItems) {
+            if ([item.title isEqualToString:@"导出为音频文件"]) hasExport = YES;
+        }
+        if (!hasExport) {
+            UIMenuItem *exportItem = [[UIMenuItem alloc] initWithTitle:@"导出为音频文件" action:NSSelectorFromString(@"dyyy_exportVoice:")];
+            [newItems addObject:exportItem];
+        }
+        %orig(newItems);
+    } else {
+        %orig(items);
+    }
+}
+%end
+
+%hook UIResponder
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
+    if (action == NSSelectorFromString(@"dyyy_exportVoice:")) {
+        return YES;
+    }
+    return %orig;
+}
+
+%new
+- (void)dyyy_exportVoice:(id)sender {
+    if (g_lastCapturedAudioPath && [[NSFileManager defaultManager] fileExistsAtPath:g_lastCapturedAudioPath]) {
+        
+        NSString *targetDir = [[DYYYAudioManager sharedManager] voiceDirectory];
+        NSString *tmpDir = [targetDir stringByAppendingPathComponent:@"DYYY_TMP_DIR"];
+        
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if (![fm fileExistsAtPath:tmpDir]) {
+            [fm createDirectoryAtPath:tmpDir withIntermediateDirectories:YES attributes:nil error:nil];
+        }
+        
+        NSString *fileName = [NSString stringWithFormat:@"私信导出_%ld.%@", (long)[[NSDate date] timeIntervalSince1970], g_lastCapturedAudioPath.pathExtension];
+        NSString *targetPath = [tmpDir stringByAppendingPathComponent:fileName];
+        
+        NSError *error = nil;
+        [fm copyItemAtPath:g_lastCapturedAudioPath toPath:targetPath error:&error];
+        
+        if (!error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [DYYYUtils showToast:@"✅ 语音已成功导出至 DYYY_TMP_DIR！"];
+            });
+        } else {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [DYYYUtils showToast:@"❌ 导出失败，请重试"];
+            });
+        }
+    } else {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [DYYYUtils showToast:@"⚠️ 请先点击播放一下该语音，然后再长按导出！"];
+        });
+    }
+}
+%end
+
 %ctor {
     if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DYYYUserAgreementAccepted"]) {
         %init;
@@ -1596,6 +1694,10 @@
 %end
 %end
 
+
+// ==========================================
+// ⚠️ 构造函数必须永远放在文件的【最底部】
+// ==========================================
 %ctor {
     Class ownerClass = objc_getClass("AWECommentLongPressPanelSwiftImpl.CommentLongPressPanelNormalSectionViewModel");
     if (ownerClass) {
