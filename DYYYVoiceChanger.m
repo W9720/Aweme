@@ -156,16 +156,25 @@ static BOOL _isAudioAssistantActive = NO;
         NSURL *outputURL = [NSURL fileURLWithPath:outputPath];
         
         // ==========================================
+ 压低   // ==========================================
         // 🛡️ 终极修复：强行瘦身为抖音标准的极简语音参数
         // ==========================================
         NSDictionary *outputSettings = @{
             AVFormatIDKey: @(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: @(16000.0),  // 🌟 降级至标准通讯采样率 16000Hz
-            AVNumberOfChannelsKey: @(1),  // 🌟 强行单声道 (核心防拦截)
-            AVEncoderBitRateKey: @(32000) // 🌟 压低码率控制体积
+            AVSampleRateKey: @(44100.0), // 保持44.1k，兼容性最强
+            AVNumberOfChannelsKey: @(1), // 🌟 必须为1：强行单声道！
+            AVEncoderBitRateKey: @(64000) 
         };
         
-        AVAudioFile *outputFile = [[AVAudioFile alloc] initForWriting:outputURL settings:outputSettings commonFormat:format.commonFormat interleaved:format.isInterleaved error:&error];
+        // 🚨 致命Bug修复：绝对不能传源文件的 commonFormat！直接使用精简版初始化方法，让系统自动混音降级！
+        AVAudioFile *outputFile = [[AVAudioFile alloc] initForWriting:outputURL settings:outputSettings error:&error];
+        
+        // 增加安全校验：如果引擎初始化失败，直接阻断
+        if (error || !outputFile) {
+            if (completion) completion(nil, error);
+            return;
+        }
+
         
         // 渲染循环
         AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:engine.manualRenderingFormat frameCapacity:engine.manualRenderingMaximumFrameCount];
