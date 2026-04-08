@@ -156,7 +156,6 @@ static BOOL _isAudioAssistantActive = NO;
         NSURL *outputURL = [NSURL fileURLWithPath:outputPath];
         
         // ==========================================
- 压低   // ==========================================
         // 🛡️ 终极修复：强行瘦身为抖音标准的极简语音参数
         // ==========================================
         NSDictionary *outputSettings = @{
