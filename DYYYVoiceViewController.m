@@ -707,44 +707,16 @@ static NSString *g_pendingReplacePath = nil;
     });
 }
 
-// 提前在后台耗时处理音频（解除时间封印版）
+// 极速秒转！直接丢给 DYYYVoiceChanger 的快速通道！
 + (void)prepareAudioForUpload:(NSString *)sourcePath toPath:(NSString *)targetPath completion:(void(^)(BOOL))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        NSFileManager *fm = [NSFileManager defaultManager];
-        NSTimeInterval duration = CMTimeGetSeconds([AVURLAsset assetWithURL:[NSURL fileURLWithPath:sourcePath]].duration);
         
         [DYYYVoiceChanger setAudioAssistantActive:YES];
         
-        BOOL processSuccess = NO;
-        if (duration > 29.5) {
-            NSString *tempTrimmedPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"temp_trimmed_pre.m4a"];
-            if ([fm fileExistsAtPath:tempTrimmedPath]) [fm removeItemAtPath:tempTrimmedPath error:nil];
-            
-            AVAsset *asset = [AVAsset assetWithURL:[NSURL fileURLWithPath:sourcePath]];
-            AVAssetExportSession *exportSession = [AVAssetExportSession exportSessionWithAsset:asset presetName:AVAssetExportPresetAppleM4A];
-            exportSession.outputURL = [NSURL fileURLWithPath:tempTrimmedPath];
-            exportSession.outputFileType = AVFileTypeAppleM4A;
-            exportSession.timeRange = CMTimeRangeFromTimeToTime(CMTimeMake(0, 1), CMTimeMakeWithSeconds(29.5, 600));
-            
-            dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-            [exportSession exportAsynchronouslyWithCompletionHandler:^{
-                dispatch_semaphore_signal(sema);
-            }];
-            // 🚨 核心修复 1：解除 15秒 超时封印！耐心等待大文件裁剪！
-            dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
-            
-            if (exportSession.status == AVAssetExportSessionStatusCompleted) {
-                processSuccess = [DYYYVoiceChanger processAudioFileFrom:tempTrimmedPath to:targetPath];
-            } else {
-                processSuccess = [DYYYVoiceChanger processAudioFileFrom:sourcePath to:targetPath];
-            }
-        } else {
-            processSuccess = [DYYYVoiceChanger processAudioFileFrom:sourcePath to:targetPath];
-        }
+        // 这一步在后台瞬间完成！
+        BOOL processSuccess = [DYYYVoiceChanger processAudioFileFrom:sourcePath to:targetPath];
         
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [DYYYVoiceChanger setAudioAssistantActive:NO];
-        });
+        [DYYYVoiceChanger setAudioAssistantActive:NO];
         
         if (completion) {
             dispatch_async(dispatch_get_main_queue(), ^{
