@@ -123,23 +123,31 @@ static BOOL _isAudioAssistantActive = NO;
             [engine attachNode:reverb];
             [audioNodes addObject:reverb];
         }
-        
+                // -----------------------------------------------------
+        // 🔗 动态连接所有节点
         // -----------------------------------------------------
-        // 🔗 动态连接所有节点 (如果没有特效，则直接连接混音器)
-        // -----------------------------------------------------
-        AVAudioFormat *format = sourceFile.processingFormat;
+        AVAudioFormat *sourceFormat = sourceFile.processingFormat;
         AVAudioNode *previousNode = playerNode;
         
         for (AVAudioNode *node in audioNodes) {
-            [engine connect:previousNode to:node format:format];
+            [engine connect:previousNode to:node format:sourceFormat];
             previousNode = node;
         }
         // 最后一个节点连向引擎的主混音器
-        [engine connect:previousNode to:engine.mainMixerNode format:format];
+        [engine connect:previousNode to:engine.mainMixerNode format:sourceFormat];
         
-        // 配置离线渲染
+        // ==========================================
+        // 🌟 核心突破：强行定义一个“单声道 + 44100Hz”的格式
+        // 让 AVAudioEngine 的混音器提前把立体声合并并降级！
+        // ==========================================
+        AVAudioFormat *monoFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32 
+                                                                     sampleRate:44100.0 
+                                                                       channels:1 
+                                                                    interleaved:NO];
+        
+        // 配置离线渲染：指定引擎直接输出我们需要的 monoFormat！
         [engine enableManualRenderingMode:AVAudioEngineManualRenderingModeOffline
-                                   format:format
+                                   format:monoFormat
                         maximumFrameCount:4096
                                     error:&error];
         if (error) { if (completion) completion(nil, error); return; }
@@ -155,38 +163,43 @@ static BOOL _isAudioAssistantActive = NO;
         NSString *outputPath = [NSTemporaryDirectory() stringByAppendingPathComponent:outFileName];
         NSURL *outputURL = [NSURL fileURLWithPath:outputPath];
         
-        // ==========================================
-        // 🛡️ 终极修复：强行瘦身为抖音标准的极简语音参数
-        // ==========================================
+        // 告诉文件系统我们要写入的标准配置 (单声道，AAC)
         NSDictionary *outputSettings = @{
             AVFormatIDKey: @(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: @(44100.0), // 保持44.1k，兼容性最强
-            AVNumberOfChannelsKey: @(1), // 🌟 必须为1：强行单声道！
+            AVSampleRateKey: @(44100.0), 
+            AVNumberOfChannelsKey: @(1), 
             AVEncoderBitRateKey: @(64000) 
         };
         
-        // 🚨 致命Bug修复：绝对不能传源文件的 commonFormat！直接使用精简版初始化方法，让系统自动混音降级！
-        AVAudioFile *outputFile = [[AVAudioFile alloc] initForWriting:outputURL settings:outputSettings error:&error];
-        
-        // 增加安全校验：如果引擎初始化失败，直接阻断
+        // 这里的 commonFormat 必须使用 monoFormat，与缓冲区严格一致，否则会崩溃！
+        AVAudioFile *outputFile = [[AVAudioFile alloc] initForWriting:outputURL 
+                                                             settings:outputSettings 
+                                                         commonFormat:monoFormat.commonFormat 
+                                                          interleaved:monoFormat.isInterleaved 
+                                                                error:&error];
         if (error || !outputFile) {
             if (completion) completion(nil, error);
             return;
         }
-
         
-        // 渲染循环
-        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:engine.manualRenderingFormat frameCapacity:engine.manualRenderingMaximumFrameCount];
-        AVAudioFramePosition length = sourceFile.length;
+        // ==========================================
+        // 🛡️ 稳健的渲染循环 (不再计算长度，直接等数据抽干)
+        // ==========================================
+        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:monoFormat frameCapacity:engine.manualRenderingMaximumFrameCount];
         
-        while (engine.manualRenderingSampleTime < length) {
-            AVAudioFrameCount framesToRender = (AVAudioFrameCount)MIN(buffer.frameCapacity, length - engine.manualRenderingSampleTime);
+        while (YES) {
+            AVAudioFrameCount framesToRender = buffer.frameCapacity;
             AVAudioEngineManualRenderingStatus status = [engine renderOffline:framesToRender toBuffer:buffer error:&error];
             
             if (status == AVAudioEngineManualRenderingStatusSuccess) {
+                // 此时 buffer 里已经是纯正的单声道数据，写入文件绝对安全！
                 [outputFile writeFromBuffer:buffer error:&error];
                 if (error) break;
-            } else if (status == AVAudioEngineManualRenderingStatusError || status == AVAudioEngineManualRenderingStatusInsufficientDataFromInputNode) {
+            } else if (status == AVAudioEngineManualRenderingStatusInsufficientDataFromInputNode) {
+                // 原音频已经读取完毕，正常结束循环
+                break;
+            } else if (status == AVAudioEngineManualRenderingStatusError) {
+                // 发生意外错误，跳出
                 break;
             }
         }
@@ -201,5 +214,3 @@ static BOOL _isAudioAssistantActive = NO;
         }
     });
 }
-
-@end
