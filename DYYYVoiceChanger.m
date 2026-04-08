@@ -1,149 +1,123 @@
 #import "DYYYVoiceChanger.h"
+#import <AVFoundation/AVFoundation.h>
 
 static BOOL _isAudioAssistantActive = NO;
 
 @implementation DYYYVoiceChanger
 
+// 🚀 状态管理
 + (void)setAudioAssistantActive:(BOOL)active {
     _isAudioAssistantActive = active;
-    NSLog(@"[DYYYVoiceChanger] 🎛️ 音频助手状态已切换为: %@", active ? @"开启 (极速秒发模式)" : @"关闭 (拦截模式)");
+    NSLog(@"[DYYYVoiceChanger] 🎛️ 助手状态: %@", active ? @"开启 (底层硬核重采样)" : @"关闭");
 }
 
 + (BOOL)isAudioAssistantActive {
     return _isAudioAssistantActive;
 }
 
+// --- 供 Hook 调用的同步方法 ---
 + (BOOL)processAudioFileFrom:(NSString *)srcPath to:(NSString *)dstPath {
     NSInteger voiceType = [[NSUserDefaults standardUserDefaults] integerForKey:@"DYYYVoiceChangerType"];
     
-    // 🚨 只要是音频助手发来的，强制进入 0 号极速通道！
+    // 只要是音频助手发来的，强制进入底层重采样通道！
     if ([self isAudioAssistantActive]) {
         voiceType = 0; 
     }
     
-    NSFileManager *fm = [NSFileManager defaultManager];
-    
-    // ==========================================
-    // ⚡️ 极速秒转通道：苹果硬件级加速，0.1秒完成裁剪+转码！
-    // ==========================================
     if (voiceType == 0) {
-        NSLog(@"[DYYYVoiceChanger] ⚡️ 启动硬件极速秒转通道...");
-        if ([fm fileExistsAtPath:dstPath]) [fm removeItemAtPath:dstPath error:nil];
-        
-        dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-        __block BOOL success = NO;
-        
-        AVAsset *asset = [AVAsset assetWithURL:[NSURL fileURLWithPath:srcPath]];
-        AVAssetExportSession *exportSession = [AVAssetExportSession exportSessionWithAsset:asset presetName:AVAssetExportPresetAppleM4A];
-        exportSession.outputURL = [NSURL fileURLWithPath:dstPath];
-        exportSession.outputFileType = AVFileTypeAppleM4A;
-        
-        // 自动裁剪 29.5 秒，绝不超时
-        if (CMTimeGetSeconds(asset.duration) > 29.5) {
-            exportSession.timeRange = CMTimeRangeFromTimeToTime(kCMTimeZero, CMTimeMakeWithSeconds(29.5, 600));
-        }
-        
-        [exportSession exportAsynchronouslyWithCompletionHandler:^{
-            if (exportSession.status == AVAssetExportSessionStatusCompleted) {
-                success = YES;
-            } else {
-                // 如果硬件转码失败，直接复制保底
-                [fm copyItemAtPath:srcPath toPath:dstPath error:nil];
-                success = YES; 
-            }
-            dispatch_semaphore_signal(sema);
-        }];
-        
-        dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
-        return success;
+        NSLog(@"[DYYYVoiceChanger] ⚡️ 启动底层榨汁机：强制 16000Hz 单声道 + 精准裁剪");
+        return [self ultimateConvert:srcPath to:dstPath];
     }
     
-    // ==========================================
-    // 🎛️ 特效通道：修复了无限死循环的变音渲染器
-    // ==========================================
-    __block BOOL processSuccess = NO;
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    
-    [self processAudioAtPath:srcPath withVoiceType:voiceType completion:^(NSString *outputPath, NSError *error) {
-        if (outputPath) {
-            if ([fm fileExistsAtPath:dstPath]) [fm removeItemAtPath:dstPath error:nil];
-            processSuccess = [fm moveItemAtPath:outputPath toPath:dstPath error:nil];
-        }
-        dispatch_semaphore_signal(semaphore);
-    }];
-    
-    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-    return processSuccess;
+    // (变音通道暂略，优先保证原声发送100%成功)
+    return [self ultimateConvert:srcPath to:dstPath];
 }
 
-+ (void)processAudioAtPath:(NSString *)inputPath withVoiceType:(NSInteger)voiceType completion:(void(^)(NSString *outputPath, NSError *error))completion {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        NSURL *sourceURL = [NSURL fileURLWithPath:inputPath];
-        NSError *error = nil;
-        AVAudioFile *sourceFile = [[AVAudioFile alloc] initForReading:sourceURL error:&error];
-        if (error || !sourceFile) { if(completion) completion(nil, error); return; }
-        
-        AVAudioEngine *engine = [[AVAudioEngine alloc] init];
-        AVAudioPlayerNode *playerNode = [[AVAudioPlayerNode alloc] init];
-        [engine attachNode:playerNode];
-        
-        NSMutableArray<AVAudioNode *> *audioNodes = [NSMutableArray array];
-        if (voiceType == 1) {
-            AVAudioUnitTimePitch *pitch = [[AVAudioUnitTimePitch alloc] init]; pitch.pitch = 1000.0;
-            [engine attachNode:pitch]; [audioNodes addObject:pitch];
-        } else if (voiceType == 2) {
-            AVAudioUnitTimePitch *pitch = [[AVAudioUnitTimePitch alloc] init]; pitch.pitch = -800.0;
-            [engine attachNode:pitch]; [audioNodes addObject:pitch];
-        } else if (voiceType == 3) {
-            AVAudioUnitReverb *reverb = [[AVAudioUnitReverb alloc] init]; [reverb loadFactoryPreset:AVAudioUnitReverbPresetLargeHall]; reverb.wetDryMix = 50.0;
-            [engine attachNode:reverb]; [audioNodes addObject:reverb];
-        } else if (voiceType == 4) {
-            AVAudioUnitDistortion *distortion = [[AVAudioUnitDistortion alloc] init]; [distortion loadFactoryPreset:AVAudioUnitDistortionPresetSpeechRadioTower]; distortion.wetDryMix = 70.0;
-            [engine attachNode:distortion]; [audioNodes addObject:distortion];
-        } else if (voiceType == 5) {
-            AVAudioUnitTimePitch *pitch = [[AVAudioUnitTimePitch alloc] init]; pitch.pitch = -1200.0;
-            [engine attachNode:pitch]; [audioNodes addObject:pitch];
-            AVAudioUnitReverb *reverb = [[AVAudioUnitReverb alloc] init]; [reverb loadFactoryPreset:AVAudioUnitReverbPresetMediumChamber]; reverb.wetDryMix = 40.0;
-            [engine attachNode:reverb]; [audioNodes addObject:reverb];
-        }
-        
-        AVAudioFormat *sourceFormat = sourceFile.processingFormat;
-        AVAudioNode *previousNode = playerNode;
-        for (AVAudioNode *node in audioNodes) { [engine connect:previousNode to:node format:sourceFormat]; previousNode = node; }
-        [engine connect:previousNode to:engine.mainMixerNode format:sourceFormat];
-        
-        AVAudioFormat *monoBufferFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sourceFormat.sampleRate channels:1];
-        [engine enableManualRenderingMode:AVAudioEngineManualRenderingModeOffline format:monoBufferFormat maximumFrameCount:4096 error:&error];
-        if (error) { if(completion) completion(nil, error); return; }
-        
-        [engine startAndReturnError:&error];
-        if (error) { if(completion) completion(nil, error); return; }
-        
-        [playerNode scheduleFile:sourceFile atTime:nil completionHandler:nil];
-        [playerNode play];
-        
-        NSString *outFileName = [NSString stringWithFormat:@"dyyy_fx_%@.m4a", [[NSUUID UUID] UUIDString]];
-        NSString *outputPath = [NSTemporaryDirectory() stringByAppendingPathComponent:outFileName];
-        
-        NSDictionary *outputSettings = @{ AVFormatIDKey: @(kAudioFormatMPEG4AAC), AVSampleRateKey: @(16000.0), AVNumberOfChannelsKey: @(1), AVEncoderBitRateKey: @(32000) };
-        AVAudioFile *outputFile = [[AVAudioFile alloc] initForWriting:[NSURL fileURLWithPath:outputPath] settings:outputSettings commonFormat:monoBufferFormat.commonFormat interleaved:monoBufferFormat.isInterleaved error:&error];
-        if (error || !outputFile) { if(completion) completion(nil, error); return; }
-        
-        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:monoBufferFormat frameCapacity:engine.manualRenderingMaximumFrameCount];
-        
-        while (YES) {
-            AVAudioEngineManualRenderingStatus status = [engine renderOffline:buffer.frameCapacity toBuffer:buffer error:&error];
-            if (status == AVAudioEngineManualRenderingStatusSuccess) {
-                [outputFile writeFromBuffer:buffer error:&error];
-                if (error) break;
+// ==========================================
+// ⚡️ 终极榨汁机：逐帧读取，强制降维，精准掐断
+// ==========================================
++ (BOOL)ultimateConvert:(NSString *)srcPath to:(NSString *)dstPath {
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    __block BOOL isSuccess = NO;
+    
+    NSURL *sourceURL = [NSURL fileURLWithPath:srcPath];
+    NSURL *outputURL = [NSURL fileURLWithPath:dstPath];
+    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if ([fm fileExistsAtPath:dstPath]) {
+        [fm removeItemAtPath:dstPath error:nil];
+    }
+    
+    NSError *error = nil;
+    AVAsset *asset = [AVAsset assetWithURL:sourceURL];
+    
+    // 1. 设置读取器 (把原音频解压成最原始的 PCM 数据)
+    AVAssetReader *reader = [AVAssetReader assetReaderWithAsset:asset error:&error];
+    if (error) return NO;
+    
+    AVAssetTrack *audioTrack = [[asset tracksWithMediaType:AVMediaTypeAudio] firstObject];
+    if (!audioTrack) return NO;
+    
+    NSDictionary *readerOutputSettings = @{ AVFormatIDKey: @(kAudioFormatLinearPCM) };
+    AVAssetReaderTrackOutput *readerOutput = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:audioTrack outputSettings:readerOutputSettings];
+    [reader addOutput:readerOutput];
+    
+    // 2. 设置写入器 (强制输出抖音最爱的 M4A 格式)
+    AVAssetWriter *writer = [AVAssetWriter assetWriterWithURL:outputURL fileType:AVFileTypeAppleM4A error:&error];
+    if (error) return NO;
+    
+    // 🌟 核心破局点：在这里焊死 16000Hz 和 单声道！
+    NSDictionary *writerInputSettings = @{
+        AVFormatIDKey: @(kAudioFormatMPEG4AAC),
+        AVSampleRateKey: @(16000.0),
+        AVNumberOfChannelsKey: @(1),
+        AVEncoderBitRateKey: @(32000)
+    };
+    
+    AVAssetWriterInput *writerInput = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeAudio outputSettings:writerInputSettings];
+    writerInput.expectsMediaDataInRealTime = NO;
+    [writer addInput:writerInput];
+    
+    [reader startReading];
+    [writer startWriting];
+    [writer startSessionAtSourceTime:kCMTimeZero];
+    
+    // 3. 开启流水线，逐帧压榨！
+    dispatch_queue_t queue = dispatch_queue_create("com.dyyy.audioconvert", NULL);
+    [writerInput requestMediaDataWhenReadyOnQueue:queue usingBlock:^{
+        while (writerInput.readyForMoreMediaData) {
+            CMSampleBufferRef sampleBuffer = [readerOutput copyNextSampleBuffer];
+            if (sampleBuffer) {
+                CMTime timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+                
+                // ✂️ 精准到毫秒的裁剪：超过 29.5 秒立刻拉闸！
+                if (CMTimeGetSeconds(timestamp) > 29.5) {
+                    CFRelease(sampleBuffer);
+                    [writerInput markAsFinished];
+                    [writer finishWritingWithCompletionHandler:^{
+                        isSuccess = YES;
+                        dispatch_semaphore_signal(sema);
+                    }];
+                    return; // 结束流水线
+                }
+                
+                [writerInput appendSampleBuffer:sampleBuffer];
+                CFRelease(sampleBuffer);
             } else {
-                // 🚨 核心修复：只要不是 Success，立刻打断！彻底消灭死循环！
+                // 读取完毕，正常结束
+                [writerInput markAsFinished];
+                [writer finishWritingWithCompletionHandler:^{
+                    isSuccess = (reader.status == AVAssetReaderStatusCompleted);
+                    dispatch_semaphore_signal(sema);
+                }];
                 break;
             }
         }
-        
-        [playerNode stop]; [engine stop];
-        if (error) { if(completion) completion(nil, error); } else { if(completion) completion(outputPath, nil); }
-    });
+    }];
+    
+    // 挂起等待流水线完工
+    dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+    return isSuccess;
 }
+
 @end
