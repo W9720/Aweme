@@ -134,14 +134,11 @@ static BOOL _isAudioAssistantActive = NO;
             previousNode = node;
         }
         [engine connect:previousNode to:engine.mainMixerNode format:sourceFormat];
-        
         // ==========================================
-        // 🌟 核心突破：继承源文件采样率！绝不重采样！
+        // 🌟 终极核心突破：统一全链路格式！焊死 16000Hz 单声道
         // ==========================================
-        AVAudioFormat *monoFormat = [[AVAudioFormat alloc] initWithCommonFormat:sourceFormat.commonFormat 
-                                                                     sampleRate:sourceFormat.sampleRate 
-                                                                       channels:1 
-                                                                    interleaved:sourceFormat.isInterleaved];
+        // 1. 强制引擎的输出模具为：标准 PCM, 16000Hz, 单声道
+        AVAudioFormat *monoFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:16000.0 channels:1];
         
         [engine enableManualRenderingMode:AVAudioEngineManualRenderingModeOffline
                                    format:monoFormat
@@ -159,22 +156,23 @@ static BOOL _isAudioAssistantActive = NO;
         NSString *outputPath = [NSTemporaryDirectory() stringByAppendingPathComponent:outFileName];
         NSURL *outputURL = [NSURL fileURLWithPath:outputPath];
         
-        // 🌟 写入设置必须与 monoFormat 严格匹配
+        // 2. 强制写入文件的格式为：AAC, 16000Hz, 单声道
+        // 这里必须和上面的 monoFormat 保持绝对一致，引擎才不会崩溃！
         NSDictionary *outputSettings = @{
             AVFormatIDKey: @(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: @(sourceFormat.sampleRate), 
+            AVSampleRateKey: @(16000.0), 
             AVNumberOfChannelsKey: @(1), 
-            AVEncoderBitRateKey: @(64000) 
+            AVEncoderBitRateKey: @(32000) 
         };
         
+        // 🚨 丢掉所有花里胡哨的参数，直接用最稳健的初始化方法
         AVAudioFile *outputFile = [[AVAudioFile alloc] initForWriting:outputURL 
                                                              settings:outputSettings 
-                                                         commonFormat:monoFormat.commonFormat 
-                                                          interleaved:monoFormat.isInterleaved 
                                                                 error:&error];
         if (error || !outputFile) { [self fallbackExportAudio:sourceURL completion:completion]; return; }
         
         AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:monoFormat frameCapacity:engine.manualRenderingMaximumFrameCount];
+
         
         while (YES) {
             AVAudioFrameCount framesToRender = buffer.frameCapacity;
