@@ -1,4 +1,5 @@
 #import "DYYYVoiceChanger.h"
+#import <UIKit/UIKit.h> // 🌟 新增：引入 UI 框架以支持错误弹窗
 
 static BOOL _isAudioAssistantActive = NO;
 
@@ -12,7 +13,7 @@ static BOOL _isAudioAssistantActive = NO;
     return _isAudioAssistantActive;
 }
 
-// 🚨 新增：硬核错误弹窗工具，帮我们找出真凶！
+// 🚨 错误弹窗工具
 + (void)showDebugAlert:(NSString *)msg {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *window = nil;
@@ -71,13 +72,11 @@ static BOOL _isAudioAssistantActive = NO;
     NSURL *dstURL = [NSURL fileURLWithPath:dstPath];
     NSFileManager *fm = [NSFileManager defaultManager];
     
-    // 检查源文件是否存在
     if (![fm fileExistsAtPath:srcPath]) {
         [self showDebugAlert:[NSString stringWithFormat:@"源文件根本不存在:\n%@", srcPath]];
         return NO;
     }
     
-    // 清理目标路径
     NSError *fileError = nil;
     if ([fm fileExistsAtPath:dstPath]) {
         [fm removeItemAtPath:dstPath error:&fileError];
@@ -127,7 +126,6 @@ static BOOL _isAudioAssistantActive = NO;
     channelLayout.mChannelLayoutTag = kAudioChannelLayoutTag_Mono;
     NSData *channelLayoutData = [NSData dataWithBytes:&channelLayout length:sizeof(AudioChannelLayout)];
     
-    // ⚠️ 很多时候是因为 32000 码率和 16000Hz 冲突，这里我们先保持原样，看它报什么错
     NSDictionary *writerSettings = @{
         AVFormatIDKey: @(kAudioFormatMPEG4AAC),
         AVSampleRateKey: @(16000.0),
@@ -172,7 +170,6 @@ static BOOL _isAudioAssistantActive = NO;
                         isFirstBuffer = NO;
                     }
                     if (![writerInput appendSampleBuffer:buffer]) {
-                        // 写入过程中崩溃！
                         dispatch_async(dispatch_get_main_queue(), ^{
                             [self showDebugAlert:[NSString stringWithFormat:@"数据压入时崩溃！\nWriter Error: %@\nReader Error: %@", writer.error, reader.error]];
                         });
