@@ -47,7 +47,7 @@ static BOOL _isAudioAssistantActive = NO;
     return processSuccess;
 }
 
-// 💥 真正的绝杀：不管你什么格式，全部打碎重铸！
+// 💥 真正的绝杀：不管你什么格式，全部打碎重铸！完美避开时间戳崩溃！
 + (BOOL)hardTranscodeAudioFrom:(NSString *)srcPath to:(NSString *)dstPath {
     NSURL *srcURL = [NSURL fileURLWithPath:srcPath];
     NSURL *dstURL = [NSURL fileURLWithPath:dstPath];
@@ -64,8 +64,16 @@ static BOOL _isAudioAssistantActive = NO;
     AVAssetTrack *audioTrack = [[asset tracksWithMediaType:AVMediaTypeAudio] firstObject];
     if (!audioTrack) return NO;
     
-    // 将任何音频解码为原始 PCM 波形
-    NSDictionary *readerSettings = @{ AVFormatIDKey: @(kAudioFormatLinearPCM) };
+    // 🚨 核心防御 1：强制要求读取器输出最干干净净的 16000Hz 单声道 PCM 波形！
+    NSDictionary *readerSettings = @{
+        AVFormatIDKey: @(kAudioFormatLinearPCM),
+        AVSampleRateKey: @(16000.0),
+        AVNumberOfChannelsKey: @(1),
+        AVLinearPCMBitDepthKey: @(16),
+        AVLinearPCMIsNonInterleaved: @(NO),
+        AVLinearPCMIsFloatKey: @(NO),
+        AVLinearPCMIsBigEndianKey: @(NO)
+    };
     AVAssetReaderTrackOutput *readerOutput = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:audioTrack outputSettings:readerSettings];
     [reader addOutput:readerOutput];
     
@@ -73,12 +81,12 @@ static BOOL _isAudioAssistantActive = NO;
     AVAssetWriter *writer = [AVAssetWriter assetWriterWithURL:dstURL fileType:AVFileTypeAppleM4A error:&error];
     if (!writer) return NO;
     
-    // 强制 16000Hz, 单声道, AAC 编码
     AudioChannelLayout channelLayout;
     memset(&channelLayout, 0, sizeof(AudioChannelLayout));
     channelLayout.mChannelLayoutTag = kAudioChannelLayoutTag_Mono;
     NSData *channelLayoutData = [NSData dataWithBytes:&channelLayout length:sizeof(AudioChannelLayout)];
     
+    // 强制 16000Hz, 单声道, AAC 编码
     NSDictionary *writerSettings = @{
         AVFormatIDKey: @(kAudioFormatMPEG4AAC),
         AVSampleRateKey: @(16000.0),
@@ -93,37 +101,63 @@ static BOOL _isAudioAssistantActive = NO;
     
     [reader startReading];
     [writer startWriting];
-    [writer startSessionAtSourceTime:kCMTimeZero];
+    
+    // 🚨 彻底删掉原来的 [writer startSessionAtSourceTime:kCMTimeZero];
     
     dispatch_queue_t queue = dispatch_queue_create("com.dyyy.transcode", NULL);
     dispatch_semaphore_t sema = dispatch_semaphore_create(0);
     __block BOOL success = NO;
+    __block BOOL isFirstBuffer = YES; // 用于精准捕获真实第一帧时间
     
-    // 3. 流水线开启：一边读取，一边裁剪，一边重铸！
+    // 3. 流水线开启：安全闭环，滴水不漏
     [writerInput requestMediaDataWhenReadyOnQueue:queue usingBlock:^{
         while (writerInput.isReadyForMoreMediaData) {
             CMSampleBufferRef sampleBuffer = [readerOutput copyNextSampleBuffer];
             if (sampleBuffer) {
-                // ✂️ 完美裁剪：超过 29.5 秒立刻掐断！
-                CMTime presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
-                if (CMTimeGetSeconds(presentationTime) > 29.5) {
+                CMTime pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+                
+                // 🚨 核心防御 2：获取音频真实的第一帧时间来启动引擎！负数也能完美包容！
+                if (isFirstBuffer) {
+                    [writer startSessionAtSourceTime:pts];
+                    isFirstBuffer = NO;
+                }
+                
+                // ✂️ 完美裁剪：超过 29.5 秒立刻安全下车！
+                if (CMTimeGetSeconds(pts) > 29.5) {
                     CFRelease(sampleBuffer);
                     [writerInput markAsFinished];
-                    break;
+                    [writer finishWritingWithCompletionHandler:^{
+                        success = (writer.status == AVAssetWriterStatusCompleted);
+                        dispatch_semaphore_signal(sema);
+                    }];
+                    return; // 🚨 核心防御 3：必须立刻 return，绝不能让系统复用闭包！
                 }
-                [writerInput appendSampleBuffer:sampleBuffer];
+                
+                @try {
+                    BOOL appendSuccess = [writerInput appendSampleBuffer:sampleBuffer];
+                    if (!appendSuccess) {
+                        CFRelease(sampleBuffer);
+                        [writerInput markAsFinished];
+                        [writer finishWritingWithCompletionHandler:^{
+                            success = NO;
+                            dispatch_semaphore_signal(sema);
+                        }];
+                        return; // 必须 return
+                    }
+                } @catch (NSException *e) {
+                    // 终极保护：即使苹果底层再次发疯，只抓取异常，绝不带崩抖音！
+                    NSLog(@"[DYYYVoiceChanger] ❌ 强转异常被拦截: %@", e.reason);
+                }
+                
                 CFRelease(sampleBuffer);
             } else {
                 [writerInput markAsFinished];
-                break;
+                [writer finishWritingWithCompletionHandler:^{
+                    success = (writer.status == AVAssetWriterStatusCompleted);
+                    dispatch_semaphore_signal(sema);
+                }];
+                return; // 必须 return
             }
-        }
-        
-        if (reader.status == AVAssetReaderStatusCompleted || reader.status == AVAssetReaderStatusFailed || !writerInput.isReadyForMoreMediaData) {
-            [writer finishWritingWithCompletionHandler:^{
-                success = (writer.status == AVAssetWriterStatusCompleted);
-                dispatch_semaphore_signal(sema);
-            }];
         }
     }];
     
