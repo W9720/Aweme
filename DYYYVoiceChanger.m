@@ -27,8 +27,6 @@ static BOOL _isAudioAssistantActive = NO;
         voiceType = 0; // 0 代表不加特效，只做格式压缩
     }
     
-    // 注意：如果是 0 (正常原声)，同样不 return NO，强行压制格式！
-    
     __block BOOL processSuccess = NO;
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
     
@@ -81,37 +79,28 @@ static BOOL _isAudioAssistantActive = NO;
         // 🎛️ 根据类型动态组装效果器 (Node Chaining)
         // -----------------------------------------------------
         if (voiceType == 1) {
-            // 🎀 萝莉音 (升调)
             AVAudioUnitTimePitch *pitch = [[AVAudioUnitTimePitch alloc] init];
             pitch.pitch = 1000.0;
             [engine attachNode:pitch];
             [audioNodes addObject:pitch];
-            
         } else if (voiceType == 2) {
-            // 🚬 大叔音 (降调)
             AVAudioUnitTimePitch *pitch = [[AVAudioUnitTimePitch alloc] init];
             pitch.pitch = -800.0;
             [engine attachNode:pitch];
             [audioNodes addObject:pitch];
-            
         } else if (voiceType == 3) {
-            // 🧚‍♀️ 空灵混响 (大厅预设)
             AVAudioUnitReverb *reverb = [[AVAudioUnitReverb alloc] init];
             [reverb loadFactoryPreset:AVAudioUnitReverbPresetLargeHall];
             reverb.wetDryMix = 50.0; // 混响强度 0~100
             [engine attachNode:reverb];
             [audioNodes addObject:reverb];
-            
         } else if (voiceType == 4) {
-            // 🤖 无情机器 (使用失真预设模拟对讲机/电音)
             AVAudioUnitDistortion *distortion = [[AVAudioUnitDistortion alloc] init];
             [distortion loadFactoryPreset:AVAudioUnitDistortionPresetSpeechRadioTower];
             distortion.wetDryMix = 70.0;
             [engine attachNode:distortion];
             [audioNodes addObject:distortion];
-            
         } else if (voiceType == 5) {
-            // 👹 恶魔低语 (降调 + 中等混响 双节点串联！)
             AVAudioUnitTimePitch *pitch = [[AVAudioUnitTimePitch alloc] init];
             pitch.pitch = -1200.0; // 比大叔更低
             [engine attachNode:pitch];
@@ -123,7 +112,8 @@ static BOOL _isAudioAssistantActive = NO;
             [engine attachNode:reverb];
             [audioNodes addObject:reverb];
         }
-                // -----------------------------------------------------
+        
+        // -----------------------------------------------------
         // 🔗 动态连接所有节点
         // -----------------------------------------------------
         AVAudioFormat *sourceFormat = sourceFile.processingFormat;
@@ -137,7 +127,7 @@ static BOOL _isAudioAssistantActive = NO;
         [engine connect:previousNode to:engine.mainMixerNode format:sourceFormat];
         
         // ==========================================
-        // 🌟 核心突破：强行定义一个“单声道 + 44100Hz”的格式
+        // 🌟 核心突破：强行定义一个“单声道 + 44100Hz”的模具格式
         // 让 AVAudioEngine 的混音器提前把立体声合并并降级！
         // ==========================================
         AVAudioFormat *monoFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32 
@@ -214,3 +204,5 @@ static BOOL _isAudioAssistantActive = NO;
         }
     });
 }
+
+@end
