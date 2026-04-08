@@ -419,17 +419,14 @@ static NSString *g_pendingReplacePath = nil;
     NSDictionary *item = self.dataList[indexPath.row];
     NSString *path = item[@"path"];
     
-    // 1. 弹出正在处理的进度框
-    UIAlertController *loadingAlert = [UIAlertController alertControllerWithTitle:@"正在洗澡瘦身" message:@"正在为您转换为抖音标准格式，请稍候..." preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *loadingAlert = [UIAlertController alertControllerWithTitle:@"正在处理" message:@"大文件需要的时间较长，请耐心等待..." preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:loadingAlert animated:YES completion:nil];
     
     NSString *readyPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"DYYY_ReadyToUpload.m4a"];
     
-    // 2. 在进入抖音前，提前将音频洗澡、压缩、裁剪完毕！
     [DYYYVoiceHelper prepareAudioForUpload:path toPath:readyPath completion:^(BOOL success) {
         [loadingAlert dismissViewControllerAnimated:YES completion:^{
             if (success) {
-                // 3. 完美子弹已上膛！
                 g_isArmed = YES;
                 g_pendingReplacePath = readyPath;
                 
@@ -438,14 +435,14 @@ static NSString *g_pendingReplacePath = nil;
                 [[NSUserDefaults standardUserDefaults] synchronize];
                 
                 UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"✅ 弹药装填完毕！"
-                                                                                      message:@"音频已提前完成所有格式伪装！\n\n请立刻返回【评论区/私信】，长按麦克风随便录 1 秒后松手，即可秒发！"
+                                                                                      message:@"音频已提前完成所有格式转换！\n\n请立刻返回【评论区/私信】，长按麦克风随便录 1 秒后松手，即可秒发！"
                                                                                preferredStyle:UIAlertControllerStyleAlert];
                 [successAlert addAction:[UIAlertAction actionWithTitle:@"去发送" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
                     [self dismissViewControllerAnimated:YES completion:nil];
                 }]];
                 [self presentViewController:successAlert animated:YES completion:nil];
             } else {
-                [DYYYVoiceHelper showCustomToast:@"❌ 转换失败，源音频过于奇葩"];
+                [DYYYVoiceHelper showCustomToast:@"❌ 转换失败"];
             }
         }];
     }];
@@ -685,9 +682,10 @@ static NSString *g_pendingReplacePath = nil;
 
 
 // =======================================================
-// 语音替换引擎 (终极子弹上膛秒替版 ⚡️)
+// 语音替换引擎 (终极子弹上膛秒替版 ⚡️ 解除时间限制)
 // =======================================================
 @implementation DYYYVoiceHelper
+
 + (void)showCustomToast:(NSString *)msg {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *win = [UIApplication sharedApplication].windows.firstObject;
@@ -709,7 +707,7 @@ static NSString *g_pendingReplacePath = nil;
     });
 }
 
-// 提前在后台耗时处理音频（裁剪+转单声道）
+// 提前在后台耗时处理音频（解除时间封印版）
 + (void)prepareAudioForUpload:(NSString *)sourcePath toPath:(NSString *)targetPath completion:(void(^)(BOOL))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         NSFileManager *fm = [NSFileManager defaultManager];
@@ -732,7 +730,8 @@ static NSString *g_pendingReplacePath = nil;
             [exportSession exportAsynchronouslyWithCompletionHandler:^{
                 dispatch_semaphore_signal(sema);
             }];
-            dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+            // 🚨 核心修复 1：解除 15秒 超时封印！耐心等待大文件裁剪！
+            dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
             
             if (exportSession.status == AVAssetExportSessionStatusCompleted) {
                 processSuccess = [DYYYVoiceChanger processAudioFileFrom:tempTrimmedPath to:targetPath];
@@ -755,7 +754,7 @@ static NSString *g_pendingReplacePath = nil;
     });
 }
 
-// 抖音发语音瞬间触发的“极速替换”（耗时仅 0.001 秒，绝不卡顿阻塞）
+// 抖音发语音瞬间触发的极速替换
 + (void)fastReplace:(NSString *)targetPath {
     if (!g_isArmed || !g_pendingReplacePath) return;
     
@@ -794,7 +793,6 @@ static void replaced_AWEIMMessageBaseViewController_sendMessage(id self, SEL _cm
             if ([fm fileExistsAtPath:path isDirectory:&isDir] && !isDir) {
                 NSString *ext = path.pathExtension.lowercaseString;
                 if ([ext isEqualToString:@"aac"] || [ext isEqualToString:@"m4a"] || [ext isEqualToString:@"wav"] || [ext isEqualToString:@"caf"] || [path.lowercaseString containsString:@"audio"] || [path.lowercaseString containsString:@"voice"]) {
-                    // 🚀 秒级替换，闪电发射
                     [DYYYVoiceHelper fastReplace:path];
                     break;
                 }
@@ -815,7 +813,6 @@ static void replaced_AVAudioRecorder_stop(id self, SEL _cmd) {
         if ([self respondsToSelector:@selector(url)]) {
             NSURL *url = [self performSelector:@selector(url)];
             if (url && url.path) {
-                // 🚀 秒级替换，闪电发射
                 [DYYYVoiceHelper fastReplace:url.path];
             }
         }
@@ -832,7 +829,6 @@ static BOOL replaced_NSFileManager_moveItemAtPath(NSFileManager* self, SEL _cmd,
     if (result && g_isArmed && dst) {
         NSString *ext = dst.pathExtension.lowercaseString;
         if ([ext isEqualToString:@"m4a"] || [ext isEqualToString:@"aac"] || [ext isEqualToString:@"wav"] || [ext isEqualToString:@"mp3"] || [dst.lowercaseString containsString:@"audio"] || [dst.lowercaseString containsString:@"voice"]) {
-            // 🚀 秒级替换，闪电发射
             [DYYYVoiceHelper fastReplace:dst];
         }
     }
