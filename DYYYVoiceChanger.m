@@ -6,31 +6,47 @@ static BOOL _isAudioAssistantActive = NO;
 
 + (void)setAudioAssistantActive:(BOOL)active {
     _isAudioAssistantActive = active;
-    NSLog(@"[DYYYVoiceChanger] 🎛️ 音频助手状态: %@", active ? @"极速提纯模式" : @"拦截模式");
 }
 
 + (BOOL)isAudioAssistantActive {
     return _isAudioAssistantActive;
 }
 
+// 🚨 新增：硬核错误弹窗工具，帮我们找出真凶！
++ (void)showDebugAlert:(NSString *)msg {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *window = nil;
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if (w.isKeyWindow) { window = w; break; }
+        }
+        if (!window) window = [UIApplication sharedApplication].windows.firstObject;
+        UIViewController *rootVC = window.rootViewController;
+        while (rootVC.presentedViewController) {
+            rootVC = rootVC.presentedViewController;
+        }
+        
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🚨 底层转换崩溃详情" 
+                                                                       message:msg 
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"复制错误" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+            [[UIPasteboard generalPasteboard] setString:msg];
+        }]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+        [rootVC presentViewController:alert animated:YES completion:nil];
+    });
+}
+
 + (BOOL)processAudioFileFrom:(NSString *)srcPath to:(NSString *)dstPath {
     NSInteger voiceType = [[NSUserDefaults standardUserDefaults] integerForKey:@"DYYYVoiceChangerType"];
     
-    // 音频助手发来的，强制进入 0 号极速提纯通道
     if ([self isAudioAssistantActive]) {
         voiceType = 0; 
     }
     
-    // ==========================================
-    // ⚡️ 核弹级提纯通道 (AVAssetReader/Writer)
-    // 无视假后缀，强行解码并重铸为 16000Hz 单声道 M4A
-    // ==========================================
     if (voiceType == 0) {
-        NSLog(@"[DYYYVoiceChanger] ⚡️ 启动底层提纯重铸机...");
         return [self hardTranscodeAudioFrom:srcPath to:dstPath];
     }
     
-    // 🎛️ 以下是变声特效通道 (保持原有逻辑)
     NSFileManager *fm = [NSFileManager defaultManager];
     __block BOOL processSuccess = NO;
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
@@ -39,6 +55,8 @@ static BOOL _isAudioAssistantActive = NO;
         if (outputPath) {
             if ([fm fileExistsAtPath:dstPath]) [fm removeItemAtPath:dstPath error:nil];
             processSuccess = [fm moveItemAtPath:outputPath toPath:dstPath error:nil];
+        } else if (error) {
+            [self showDebugAlert:[NSString stringWithFormat:@"变声器渲染失败:\n%@", error]];
         }
         dispatch_semaphore_signal(semaphore);
     }];
@@ -47,46 +65,69 @@ static BOOL _isAudioAssistantActive = NO;
     return processSuccess;
 }
 
-// 💥 真正的终极绝杀：无视任何高质量/高保真/长音频，时空截断 + 柔和重铸！
+// 💥 带有全面错误捕获的提纯重铸机
 + (BOOL)hardTranscodeAudioFrom:(NSString *)srcPath to:(NSString *)dstPath {
     NSURL *srcURL = [NSURL fileURLWithPath:srcPath];
     NSURL *dstURL = [NSURL fileURLWithPath:dstPath];
     NSFileManager *fm = [NSFileManager defaultManager];
-    if ([fm fileExistsAtPath:dstPath]) [fm removeItemAtPath:dstPath error:nil];
+    
+    // 检查源文件是否存在
+    if (![fm fileExistsAtPath:srcPath]) {
+        [self showDebugAlert:[NSString stringWithFormat:@"源文件根本不存在:\n%@", srcPath]];
+        return NO;
+    }
+    
+    // 清理目标路径
+    NSError *fileError = nil;
+    if ([fm fileExistsAtPath:dstPath]) {
+        [fm removeItemAtPath:dstPath error:&fileError];
+        if (fileError) {
+            [self showDebugAlert:[NSString stringWithFormat:@"无法删除旧文件:\n%@", fileError]];
+            return NO;
+        }
+    }
     
     AVAsset *asset = [AVAsset assetWithURL:srcURL];
     NSError *error = nil;
     
     AVAssetReader *reader = [AVAssetReader assetReaderWithAsset:asset error:&error];
-    if (!reader) return NO;
+    if (!reader) {
+        [self showDebugAlert:[NSString stringWithFormat:@"Reader 初始化失败 (无法解码此文件):\n%@", error]];
+        return NO;
+    }
     
-    // 🌟 终极神技【时空截断】：大文件/长音频的克星！
-    // 不管文件多大，只抽取前 29.5 秒进行解码，彻底告别内存爆炸和漫长等待！
     CMTime duration = asset.duration;
     if (CMTimeGetSeconds(duration) > 29.5) {
         reader.timeRange = CMTimeRangeMake(kCMTimeZero, CMTimeMakeWithSeconds(29.5, 600));
     }
     
     AVAssetTrack *audioTrack = [[asset tracksWithMediaType:AVMediaTypeAudio] firstObject];
-    if (!audioTrack) return NO;
+    if (!audioTrack) {
+        [self showDebugAlert:@"此文件没有音频轨道！它可能是一个损坏的文件或纯视频。"];
+        return NO;
+    }
     
-    // 🌟 核心防御 1【顺水推舟】：绝不在读取端强行降频！
-    // 让它输出最原始、最自然的 PCM 波形，哪怕它是 192kHz 的怪物！
-    NSDictionary *readerSettings = @{
-        AVFormatIDKey: @(kAudioFormatLinearPCM)
-    };
+    NSDictionary *readerSettings = @{ AVFormatIDKey: @(kAudioFormatLinearPCM) };
     AVAssetReaderTrackOutput *readerOutput = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:audioTrack outputSettings:readerSettings];
-    [reader addOutput:readerOutput];
+    if ([reader canAddOutput:readerOutput]) {
+        [reader addOutput:readerOutput];
+    } else {
+        [self showDebugAlert:@"Reader 拒绝添加输出端口。"];
+        return NO;
+    }
     
     AVAssetWriter *writer = [AVAssetWriter assetWriterWithURL:dstURL fileType:AVFileTypeAppleM4A error:&error];
-    if (!writer) return NO;
+    if (!writer) {
+        [self showDebugAlert:[NSString stringWithFormat:@"Writer 初始化失败:\n%@", error]];
+        return NO;
+    }
     
     AudioChannelLayout channelLayout;
     memset(&channelLayout, 0, sizeof(AudioChannelLayout));
     channelLayout.mChannelLayoutTag = kAudioChannelLayoutTag_Mono;
     NSData *channelLayoutData = [NSData dataWithBytes:&channelLayout length:sizeof(AudioChannelLayout)];
     
-    // 🌟 核心防御 2【降维打击】：在写入端进行降频，苹果底层会自动调用最优的软件重采样器
+    // ⚠️ 很多时候是因为 32000 码率和 16000Hz 冲突，这里我们先保持原样，看它报什么错
     NSDictionary *writerSettings = @{
         AVFormatIDKey: @(kAudioFormatMPEG4AAC),
         AVSampleRateKey: @(16000.0),
@@ -97,19 +138,27 @@ static BOOL _isAudioAssistantActive = NO;
     
     AVAssetWriterInput *writerInput = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeAudio outputSettings:writerSettings];
     writerInput.expectsMediaDataInRealTime = NO;
+    
     if ([writer canAddInput:writerInput]) {
         [writer addInput:writerInput];
     } else {
+        [self showDebugAlert:@"Writer 拒绝接受写入参数！极大概率是 16000Hz 采样率和当前的设备硬件编码器不兼容。"];
         return NO;
     }
     
-    [reader startReading];
-    [writer startWriting];
+    if (![reader startReading]) {
+        [self showDebugAlert:[NSString stringWithFormat:@"无法开始读取数据:\n%@", reader.error]];
+        return NO;
+    }
+    
+    if (![writer startWriting]) {
+        [self showDebugAlert:[NSString stringWithFormat:@"无法开始写入数据:\n%@", writer.error]];
+        return NO;
+    }
     
     dispatch_semaphore_t sema = dispatch_semaphore_create(0);
     __block BOOL success = NO;
     
-    // 🌟 核心防御 3【稳健搬运工】：用最原始的 while 循环替代闭包，杜绝回调错乱
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         BOOL isFirstBuffer = YES;
         
@@ -118,32 +167,48 @@ static BOOL _isAudioAssistantActive = NO;
                 CMSampleBufferRef buffer = [readerOutput copyNextSampleBuffer];
                 if (buffer) {
                     if (isFirstBuffer) {
-                        // 精准捕获真实第一帧时间，完美包容负数时间戳！
                         CMTime pts = CMSampleBufferGetPresentationTimeStamp(buffer);
                         [writer startSessionAtSourceTime:pts];
                         isFirstBuffer = NO;
                     }
-                    [writerInput appendSampleBuffer:buffer];
+                    if (![writerInput appendSampleBuffer:buffer]) {
+                        // 写入过程中崩溃！
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [self showDebugAlert:[NSString stringWithFormat:@"数据压入时崩溃！\nWriter Error: %@\nReader Error: %@", writer.error, reader.error]];
+                        });
+                        CFRelease(buffer);
+                        break;
+                    }
                     CFRelease(buffer);
                 } else {
-                    // 读取完毕 (可能是读到了 29.5 秒的截断处)
                     [writerInput markAsFinished];
                     break;
                 }
             } else {
-                // 写入器消化太慢，休息 5 毫秒防 CPU 飙升
                 [NSThread sleepForTimeInterval:0.005];
             }
         }
         
-        // 扫尾工作
         if (reader.status == AVAssetReaderStatusCompleted && !isFirstBuffer) {
             [writer finishWritingWithCompletionHandler:^{
-                success = (writer.status == AVAssetWriterStatusCompleted);
+                if (writer.status == AVAssetWriterStatusCompleted) {
+                    success = YES;
+                } else {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [self showDebugAlert:[NSString stringWithFormat:@"收尾写入失败:\n%@", writer.error]];
+                    });
+                }
                 dispatch_semaphore_signal(sema);
             }];
         } else {
             [writer cancelWriting];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (reader.status == AVAssetReaderStatusFailed) {
+                    [self showDebugAlert:[NSString stringWithFormat:@"读取过程中断:\n%@", reader.error]];
+                } else if (isFirstBuffer) {
+                    [self showDebugAlert:@"未能读取到任何有效数据 (文件损坏或为空)。"];
+                }
+            });
             dispatch_semaphore_signal(sema);
         }
     });
@@ -152,7 +217,7 @@ static BOOL _isAudioAssistantActive = NO;
     return success;
 }
 
-// --- 变声特效渲染器 (保持不变) ---
+// --- 变声特效渲染器 (暂不修改) ---
 + (void)processAudioAtPath:(NSString *)inputPath withVoiceType:(NSInteger)voiceType completion:(void(^)(NSString *outputPath, NSError *error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         NSURL *sourceURL = [NSURL fileURLWithPath:inputPath];
